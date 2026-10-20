@@ -242,7 +242,7 @@ async def test_baseline_final_answer(incident, tmp_path):
     assert report.verdict is Verdict.CONCLUSIVE
     assert [h.hypothesis_id for h in report.hypotheses] == ["H1", "H2"]
     assert outcome.ledger.budget.critic_rounds == 0  # Req 25.2: zero Critic_Rounds
-    assert len(outcome.events("tool_call")) == 1
+    assert len(outcome.events("tool_call")) == 4 + 1  # the four opening requests (Req 25.11), then step 1's
     assert {str(p.caller) for p in outcome.prompts} == {"baseline"}  # no other Agent is invoked (Req 25.1)
 
 
@@ -257,10 +257,12 @@ async def test_baseline_failed(incident, tmp_path):
 
 
 async def test_baseline_tool_call_budget_stop(incident, tmp_path):
+    # The four opening requests count against the budget (Req 25.11), so 5 leaves room for one step.
     script = [ScriptEntry("baseline", text=baseline_tool_step(incident)) for _ in range(3)]
-    outcome = await run_scripted("baseline", incident, tmp_path / "out", script, fallback=False, budgets={"tool_calls": 1})
+    outcome = await run_scripted("baseline", incident, tmp_path / "out", script, fallback=False, budgets={"tool_calls": 5})
 
     assert_single_report(outcome, TerminationReason.TOOL_CALL_BUDGET_EXHAUSTED)
     report = outcome.report
     assert report.verdict is Verdict.INCONCLUSIVE and report.built_by == "deterministic"
-    assert outcome.ledger.budget.tool_calls == 1
+    assert outcome.ledger.budget.tool_calls == 5
+    assert len(outcome.prompts) == 1  # one step, then the budget stops the loop before the next

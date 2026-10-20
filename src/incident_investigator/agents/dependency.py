@@ -1,6 +1,5 @@
 """Dependency_Agent: changes, dependencies and incident history (Req 9)."""
 
-from datetime import timedelta
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel
@@ -9,13 +8,13 @@ from ..llm.base import ValidationContext
 from ..models.base import JsonValue, StrictModel, TimeRange
 from ..models.outputs import DependencyFindings, SpecialistStep
 from ..models.tasks import Task
-from ..models.vocab import AgentName, ChangeType, FindingType, ToolName
+from ..models.vocab import AgentName, FindingType
 from .base import AgentContext
+from .opening import OPENING_DEPENDENCY_DEPTH, change_window, dependency_openings
 from .prompts import templates
-from .specialist import OPENING_LIMIT, SpecialistAgent, ToolPlan
+from .specialist import SpecialistAgent, ToolPlan
 
-OPENING_DEPENDENCY_DEPTH = 5
-"""Depth of the opening get_dependencies request: the whole upstream and downstream neighbourhood."""
+__all__ = ["OPENING_DEPENDENCY_DEPTH", "DependencyAgent", "check_dependency", "lookback_window"]
 
 
 class DependencyToolRequest(StrictModel):
@@ -31,8 +30,7 @@ class DependencyStep(SpecialistStep[DependencyFindings]):
 
 def lookback_window(ctx: AgentContext) -> TimeRange:
     """``[start - change_lookback, start)`` (Req 9.2)."""
-    start = ctx.incident.start_time
-    return TimeRange(start=start - timedelta(seconds=ctx.config.orchestrator.change_lookback_s), end=start)
+    return change_window(ctx.incident, ctx.config.orchestrator)
 
 
 def check_dependency(output: BaseModel, vctx: ValidationContext) -> list[str]:
@@ -70,22 +68,8 @@ class DependencyAgent(SpecialistAgent):
     extra_vocabularies: ClassVar[dict[str, list[str]]] = {"finding_type": [f.value for f in FindingType]}
 
     def opening_requests(self, task: Task, ctx: AgentContext) -> list[ToolPlan]:
-        service = ctx.incident.affected_service
-        return [
-            (
-                ToolName.GET_DEPLOYMENTS,
-                {
-                    "service": service,
-                    "time_range": lookback_window(ctx).model_dump(mode="json"),
-                    "change_types": [c.value for c in ChangeType],
-                    "limit": OPENING_LIMIT,
-                },
-            ),
-            (
-                ToolName.GET_DEPENDENCIES,
-                {"service": service, "depth": OPENING_DEPENDENCY_DEPTH, "limit": OPENING_LIMIT},
-            ),
-        ]
+        # Shared with the Baseline_Agent's harness (agents/opening.py), so both systems start alike.
+        return dependency_openings(ctx.incident, ctx.config.orchestrator)
 
     def check(self, output: BaseModel, vctx: ValidationContext) -> list[str]:
         return check_dependency(output, vctx)

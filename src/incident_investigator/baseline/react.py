@@ -1,5 +1,10 @@
 """Baseline_Agent: one sequential ReAct loop over the same Tools, budgets and report model (Req 25).
 
+Before step 1 the harness issues the same opening Tool_Requests the Specialists make in their first
+Tasks (``agents/opening.py``), through the same Tool_Layer and against the same Tool_Call Budget, and
+puts their Observations at the start of the history (Req 25.11). The prompt carries the same generic
+investigation checklist as the Specialists and the Reasoning_Agent.
+
 Each step is one ``baseline_step`` LLM call (plus at most one repair) that yields a reasoning note
 and exactly one Tool_Request or a final answer. Observations, including error Observations, go back
 into the next step's prompt. A final answer goes through the Citation_Validator, the
@@ -17,6 +22,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from ..agents.opening import opening_plan
 from ..agents.prompts import templates
 from ..clock import ClockTimeout
 from ..errors import BudgetBlocked, RunClosed
@@ -49,7 +55,7 @@ from ..state.verdict import baseline_verdict
 from ..tools.layer import BoardToolBudget, ScopedToolPort, build_tool_layer
 from ..tools.snapshot import PathGuard, SnapshotLoader
 from ..tracing import TraceRecorder
-from .prompt import StepRecord, baseline_prompt
+from .prompt import OPENING_NOTE, StepRecord, baseline_prompt
 
 ALL_TOOLS: frozenset[ToolName] = frozenset(ToolName)
 
@@ -202,7 +208,18 @@ class BaselineRun:
             return TerminationReason.WALL_CLOCK_TIMEOUT
         return None
 
+    async def _opening_requests(self) -> None:
+        """The same opening Tool_Requests the Specialists make in their first Tasks (Req 25.11), issued
+        before step 1 through the same Tool_Layer and Tool_Call Budget. Their Observations open the history."""
+        for _, tool, params in opening_plan(self.inputs.incident_report, self.config.orchestrator):
+            observation = await self.tools.request(None, tool, params)
+            self.history.append(StepRecord(step=0, reasoning_note=OPENING_NOTE, observation=observation, opening=True))
+
     async def _loop(self) -> _LoopEnd:
+        try:
+            await self._opening_requests()
+        except RunClosed:
+            return _LoopEnd(TerminationReason.WALL_CLOCK_TIMEOUT)
         step = 0
         while True:
             reason = self._limit_reached()
@@ -262,6 +279,7 @@ class BaselineRun:
             config=self.config,
             step=step,
             tool_calls_used=board.usage.tool_calls,
+            tokens_used=board.usage.total_tokens,
         )
         output = await self.gateway.structured(
             BASELINE, CallKind.BASELINE_STEP, templates.BASELINE, user, BaselineStep, vctx, check_baseline_step

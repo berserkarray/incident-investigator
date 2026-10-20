@@ -494,7 +494,8 @@ class OfflineResponder(RecordingMixin):
 
     # baseline: a fixed probe sequence, then a final answer from the reasoning heuristic (design D4).
     # The probes start from the windows the Baseline prompt suggests, which are the same windows the
-    # Specialists' opening requests use, so both systems begin from the same queries.
+    # Specialists' opening requests use. The harness already issued those openings (Req 25.11), so a
+    # probe whose Tool already appears in the history is skipped rather than repeated.
 
     @staticmethod
     def _probes(ctx: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -532,10 +533,12 @@ class OfflineResponder(RecordingMixin):
     def _baseline_step(self, ctx: dict[str, Any]) -> dict[str, Any]:
         history = ctx.get("history", [])
         probes = self._probes(ctx)
-        if len(history) < len(probes):
-            tool, params = probes[len(history)]
+        seen = {t.get("observation", {}).get("tool") for t in history}
+        pending = [(i, tool, params) for i, (tool, params) in enumerate(probes) if tool not in seen]
+        if pending:
+            index, tool, params = pending[0]
             return {
-                "reasoning_note": f"Probe {len(history) + 1} of {len(probes)}: {tool}.",
+                "reasoning_note": f"Probe {index + 1} of {len(probes)}: {tool}.",
                 "tool_request": {"tool": tool, "params": params},
             }
         evidence = [self._history_evidence(t) for t in history if t.get("observation", {}).get("evidence_id")]

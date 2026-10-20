@@ -13,15 +13,15 @@ from factories import SERVICES, at, make_config, make_incident_report, make_snap
 from incident_investigator.agents.base import AgentContext
 from incident_investigator.agents.dependency import DependencyAgent, check_dependency
 from incident_investigator.agents.observability import ObservabilityAgent
+from incident_investigator.agents.opening import opening_plan
 from incident_investigator.agents.planner import plan_check, request_plan
 from incident_investigator.agents.prompts import templates
 from incident_investigator.agents.prompts.builders import (
-    BaselineTurn,
-    baseline_prompt,
     critic_prompt,
     reasoning_prompt,
 )
 from incident_investigator.agents.reasoning import assign_hypothesis_ids
+from incident_investigator.baseline.prompt import OPENING_NOTE, StepRecord, baseline_prompt
 from incident_investigator.clock import FakeClock
 from incident_investigator.llm.base import LLMRequest, ValidationContext
 from incident_investigator.llm.context import extract_context
@@ -395,13 +395,24 @@ async def test_offline_dependency_findings_validate_and_cite_the_records():
 
 
 async def test_offline_baseline_probes_then_answers_with_a_valid_final_answer():
+    # Test fix (Req 25.11): the harness now issues the opening requests before step 1, so the history
+    # starts with them and the offline responder probes only the Tool the openings do not cover.
     env = Env(offline=True)
     port = ScopedToolPort(env.layer, "baseline", None)
     claims = await env.board.record_initial_claims()
-    history: list[BaselineTurn] = []
+    history: list[StepRecord] = []
+    for _, tool, params in opening_plan(INCIDENT, env.config.orchestrator):
+        obs = await port.request(None, tool, params)
+        history.append(StepRecord(step=0, reasoning_note=OPENING_NOTE, observation=obs, opening=True))
     for step in range(1, 8):
         user = baseline_prompt(
-            incident=INCIDENT, components=env.snapshot.component_names, claims=claims, history=history, step=step
+            incident=INCIDENT,
+            claims=claims,
+            components=env.snapshot.component_names,
+            history=history,
+            config=env.config,
+            step=step,
+            tool_calls_used=len(history),
         )
         request = LLMRequest(
             caller="baseline", call_kind=CallKind.BASELINE_STEP, model="m", system=templates.BASELINE, user=user
@@ -411,10 +422,11 @@ async def test_offline_baseline_probes_then_answers_with_a_valid_final_answer():
             break
         assert out.tool_request.params["limit"] <= 25
         obs = await port.request(None, out.tool_request.tool, out.tool_request.params)
-        history.append(BaselineTurn(step, out.reasoning_note, out.tool_request.tool, out.tool_request.params, obs))
-    assert [t.tool for t in history] == [
+        history.append(StepRecord(step=step, reasoning_note=out.reasoning_note, observation=obs))
+    assert [str(t.observation.tool) for t in history] == [
         "query_logs", "query_metrics", "get_deployments", "get_dependencies", "search_incidents",
     ]
+    assert [t.step for t in history] == [0, 0, 0, 0, 1]
     assert all(t.observation.error is None for t in history)
     answer = out.final_answer
     assert answer.hypotheses and {s.claim_id for s in answer.claim_statuses} == {c.claim_id for c in claims}

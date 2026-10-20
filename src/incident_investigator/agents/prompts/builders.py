@@ -9,7 +9,6 @@ the records of their own Observations, up to each request's record limit (Req 25
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from ...llm.context import render_context
@@ -26,7 +25,6 @@ from ...models.vocab import (
     CauseType,
     ChangeType,
     ConcernCategory,
-    FindingType,
     LogLevel,
     MetricName,
     ToolName,
@@ -303,50 +301,3 @@ def reporting_prompt(
         "action_categories": [c.value for c in ActionCategory],
     }
     return "Write the remediation recommendations for the final report.\n\n" + render_context(context)
-
-
-@dataclass(frozen=True)
-class BaselineTurn:
-    """One completed Baseline_Agent step: its note, its Tool_Request and the Observation it returned."""
-
-    step: int
-    note: str
-    tool: str
-    params: Mapping[str, Any]
-    observation: Observation
-
-
-def baseline_prompt(
-    *,
-    incident: IncidentReport,
-    components: Sequence[str],
-    claims: Sequence[IncidentClaim],
-    history: Sequence[BaselineTurn],
-    step: int,
-) -> str:
-    tools = list(ToolName)
-    context = {
-        "role": "baseline",
-        "incident": incident_entry(incident),
-        "components": sorted(components),
-        "claims": [claim_entry(c) for c in claims],
-        "cause_types": [c.value for c in CauseType],
-        "finding_types": [f.value for f in FindingType],
-        "action_categories": [c.value for c in ActionCategory],
-        "max_hypotheses": MAX_HYPOTHESES,
-        "tools": tool_schemas(tools),
-        "vocabularies": tool_vocabularies(tools),
-        "history": [
-            {
-                "step": turn.step,
-                "reasoning_note": turn.note,
-                "tool_request": {"tool": turn.tool, "params": dict(turn.params)},
-                "observation": observation_entry(turn.observation),
-            }
-            for turn in history
-        ],
-        "step": step,
-    }
-    return (
-        "Investigate the incident. Request one tool or give your final answer.\n\n" + render_context(context)
-    )

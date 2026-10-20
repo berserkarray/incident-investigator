@@ -621,7 +621,9 @@ Every Tool_Request counts as one step, including rejected ones (Req 8.4, 9.5). E
 | Reasoning | Per Req 10.7: each Evidence_Item's ID, Tool, query, reliability and summary (no records); all Data_Gaps; claim statuses; Evidence_Requests; latest Reasoning Hypotheses. Also findings Claims, `valid_components`, the Cause_Type vocabulary |
 | Critic | Per Req 11.15: evidence summaries only; active Hypotheses; Data_Gaps; claim statuses; prior requests and their outcomes; round / budget; concern categories and the historical / low-reliability rules; Tools per Specialist; `valid_components` |
 | Reporting | Verdict; Termination_Reason; active and superseded Hypotheses with adjusted confidence; evidence summaries; findings; Data_Gaps; missing-evidence list; max actions; categories |
-| Baseline | Incident_Report; all five Tool schemas; `valid_components`; full step history (notes + Observations) |
+| Baseline | Incident_Report; claims; all five Tool schemas and vocabularies; `valid_components`; the opening windows; Tool_Call and token Budget used / limit; full step history (opening Observations at step 0, then notes + Observations) |
+
+**Shared investigation checklist.** `INVESTIGATION_CHECKLIST` in `agents/prompts/templates.py` is one generic constant included verbatim in the Observability, Dependency, Reasoning and Baseline templates (Req 25.12): verify the report's claims, keep competing hypotheses open, check recent changes and upstream dependencies, treat past incidents as hints only, and declare no verdict until each ranked hypothesis has current, complete support or the budget is spent. It names no scenario, cause or Component.
 
 ### Baseline_Agent (`baseline/react.py`)
 
@@ -632,9 +634,12 @@ async def run_baseline(inputs: RunInputs, deps: RunDependencies, sink: RunOutput
 The Baseline_Agent uses the same Tool_Layer stack, configuration fields, Citation_Validator, Confidence_Policy and report model as the Investigator (Req 25.2). Its loop:
 
 1. Record the claims as `unverified` (Req 25.8).
-2. While `tool_calls < budget ∧ tokens < token_budget ∧ ¬timeout`, run one `baseline_step` call (+1 repair). On Agent_Failure, retry the step once. A second failure records a Data_Gap (`source = baseline`, step n) and ends with `baseline_failed` → DRG (Req 25.9).
-3. A `tool_request` result passes its Observation to the next step. A `final_answer` goes through the Citation_Validator, the Confidence_Policy, `baseline_verdict` and the ReportAssembler, and ends with `final_answer` (Req 25.4).
-4. If a limit is reached first → DRG with the matching reason (Req 25.6).
+2. Issue the opening Tool_Requests from `agents/opening.opening_plan()`, the module the Specialists' first Tasks also use: logs and the error-rate metric of the affected service over the telemetry window, `get_deployments` over the change lookback, and `get_dependencies`. They go through the same Tool_Layer and count against the Tool_Call Budget. Their Observations open the history as step 0 (`opening=true`). They are not steps, so they make no LLM call and record no `baseline_step` event (Req 25.11). They run under the wall-clock watchdog; a closed run ends with `wall_clock_timeout`.
+3. While `tool_calls < budget ∧ tokens < token_budget ∧ ¬timeout`, run one `baseline_step` call (+1 repair). On Agent_Failure, retry the step once. A second failure records a Data_Gap (`source = baseline`, step n) and ends with `baseline_failed` → DRG (Req 25.9).
+4. A `tool_request` result passes its Observation to the next step. A `final_answer` goes through the Citation_Validator, the Confidence_Policy, `baseline_verdict` and the ReportAssembler, and ends with `final_answer` (Req 25.4).
+5. If a limit is reached first, including during the openings → DRG with the matching reason (Req 25.6).
+
+The prompt carries the shared investigation checklist (Req 25.12) and shows the Tool_Call and token Budgets used and remaining, so the model can answer before the token Budget runs out.
 
 ### Report (`report/`)
 

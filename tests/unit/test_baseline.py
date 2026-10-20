@@ -73,6 +73,8 @@ def entry(step: dict | str, **kwargs) -> ScriptEntry:
 
 def setup_run(tmp_path: Path, entries, **sections):
     snapshot_dir = write_snapshot_dir(tmp_path / "snapshots")
+    # Random failure injection off, so the opening requests (Req 25.11) and every step's request are predictable.
+    sections.setdefault("tools", {"failure_injection": {"random_enabled": False}})
     config = make_config(
         paths={"snapshot_root": str(tmp_path / "snapshots"), "answer_key_root": str(tmp_path / "keys")}, **sections
     )
@@ -99,9 +101,13 @@ async def test_final_answer_is_validated_and_assembled(tmp_path):
     assert [a.producer for a in report.recommended_actions] == ["baseline"]
     assert report.budget_usage.critic_rounds.used == 0  # zero Critic_Rounds (Req 25.2)
 
-    # the Observation of step 1 (Evidence_ID and records) reaches step 2 (Req 25.1, 25.10)
+    # the four opening Observations are in the first prompt (Req 25.11); the Observation of step 1
+    # (Evidence_ID and records) reaches step 2 (Req 25.1, 25.10)
     assert [p.call_kind for p in fake.prompts] == [CallKind.BASELINE_STEP, CallKind.BASELINE_STEP]
-    assert '"evidence_id":"E0001"' in fake.prompts[1].user and "timeout 504" in fake.prompts[1].user
+    first, second = fake.prompts[0].user, fake.prompts[1].user
+    assert all(f'"evidence_id":"E000{i}"' in first for i in range(1, 5)) and '"E0005"' not in first
+    assert '"opening":true' in first and "timeout 504" in first
+    assert '"evidence_id":"E0005"' in second and '"step":1' in second
     assert [(e.step, e.action) for e in trace.of_type("baseline_step")] == [(1, "tool"), (2, "final")]
     assert [e.reason for e in trace.of_type("termination")] == [TerminationReason.FINAL_ANSWER]
     assert trace.of_type("run_ended")[0].termination_reason is TerminationReason.FINAL_ANSWER
@@ -131,9 +137,11 @@ async def test_step_failing_twice_ends_with_baseline_failed(tmp_path):
 
 
 async def test_tool_call_budget_stops_before_the_next_step(tmp_path):
-    run, fake, _ = setup_run(tmp_path, [entry(LOGS_STEP), entry(LOGS_STEP)], budgets={"tool_calls": 1})
+    # Test fix (Req 25.11): the four opening requests count against the budget, so 5 leaves one step.
+    run, fake, _ = setup_run(tmp_path, [entry(LOGS_STEP), entry(LOGS_STEP)], budgets={"tool_calls": 5})
     result = await run.execute()
     assert result.report.termination_reason is TerminationReason.TOOL_CALL_BUDGET_EXHAUSTED
+    assert result.report.budget_usage.tool_calls.used == 5
     assert result.report.budget_limit.limit == "tool_calls"
     assert result.report.verdict is Verdict.INCONCLUSIVE and result.report.built_by == "deterministic"
     assert len(fake.prompts) == 1 and fake.remaining() == 1

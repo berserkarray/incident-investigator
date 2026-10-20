@@ -15,7 +15,6 @@ validation and is repaired; the ScopedToolPort is a second guard (Req 8.1, 9.1).
 """
 
 from collections.abc import Sequence
-from datetime import timedelta
 from typing import Any, ClassVar
 
 from pydantic import BaseModel
@@ -28,15 +27,10 @@ from ..models.outputs import SpecialistStep
 from ..models.tasks import Task
 from ..models.vocab import SPECIALIST_TOOLS, CallKind, ToolName
 from .base import Agent, AgentContext, AgentOutcome
+from .opening import OPENING_LIMIT, OPENING_WINDOW_AFTER, ToolPlan
 from .prompts.builders import specialist_prompt
 
-OPENING_WINDOW_AFTER = timedelta(hours=2)
-"""End of the opening query window after the reported start time (a documented constant, not config)."""
-
-OPENING_LIMIT = 25
-"""Record limit of every code-issued Tool_Request (token discipline)."""
-
-ToolPlan = tuple[ToolName, dict[str, JsonValue]]
+__all__ = ["OPENING_LIMIT", "OPENING_WINDOW_AFTER", "SpecialistAgent", "ToolPlan"]
 
 
 def _hypothesis(ctx: AgentContext, hypothesis_id: str) -> HypothesisRevision | None:

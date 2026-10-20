@@ -432,7 +432,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - Hypothesis IDs and the sufficiency flag are assigned once, by `agents/reasoning.assign_hypothesis_ids()`, called from `InvestigatorRun._commit_reasoning()`.
     - The Planner calls `agents/planner.request_plan()` (prompt and repairable content rules) and keeps `TaskGraph.validate_plan()` and the Default_Task_Graph fallback.
     - One Support_Check, `state/support.py`. Its free-text rule also requires CURRENT, as D2's "Historical_Evidence supports only past-incident claims" demands.
-    - The OfflineResponder's `baseline_step` starts from the Baseline prompt's `suggested_windows`, the same windows the Specialists' opening requests use.
+    - The OfflineResponder's `baseline_step` starts from the Baseline prompt's `suggested_windows`, the same windows the Specialists' opening requests use, and skips every probe whose Tool the opening Observations already cover (Req 25.11).
     - The Results_Table JSON keeps exact means and Spreads (Property 62); the Markdown prints 4 decimals.
   - [ ] 10.4 Write the README
     - Setup (Python 3.11+, install command, `OPENAI_API_KEY`, every config field with its default, example `generate`, `investigate`, `eval` and `pytest` commands); Architecture (the design Mermaid component diagram and an explanation of coordination: Blackboard, Task_Graph, parallel dispatch, Critic feedback loop, budgets and every Termination_Reason); External Dependencies (OpenAI key, no key for tests or the fake provider, every pinned package and version); Deliverables index (transcript, both Results_Tables, scenarios, tests, `TECHNICAL_NOTE.md`, `ASSUMPTIONS.md`); Incomplete Functionality (task 10.6).
@@ -461,7 +461,12 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - First run one scenario × 1 run per system, report the measured tokens per Run and an estimated total cost for 72 Runs, and ask the user to confirm.
     - After confirmation: `incident-investigator eval --config config.toml --out results/` and commit the Markdown and JSON Results_Tables and per-Run outputs. The table records the command, date (YYYY-MM-DD), Seed, provider and model.
     - Scan every committed results file for the API key value.
-    - _Requirements: 26.1, 26.4, 26.5, 31.6, 31.11_
+    - Baseline parity, added after the first real smoke (no-go: the baseline ended after 1–3 tool calls):
+      - `agents/opening.py` holds the opening Tool_Requests; the Specialists' first Tasks and the Baseline harness both call `opening_plan()`. The harness issues them before step 1 through the same Tool_Layer and budget, and their Observations open the first prompt (Req 25.11).
+      - `INVESTIGATION_CHECKLIST` is included verbatim in the Observability, Dependency, Reasoning and Baseline templates; the sentences it replaced were removed from those templates. The Baseline prompt also shows tool vocabularies and the token budget used and remaining (Req 25.12).
+      - `tests/e2e/test_baseline_parity.py` checks identical opening requests and outcomes for both systems, with random injection off and on, and that the openings stop at the Tool_Call Budget.
+      - CLI e2e tests patch `cli.SystemClock` with `FakeClock`. Injected timeouts back off on the Clock, and the real-sleep guard used to surface only as a hidden Specialist Agent_Failure.
+    - _Requirements: 25.11, 25.12, 26.1, 26.4, 26.5, 31.6, 31.11_
   - [ ] 12.3 Update the README with the results
     - Add a short results summary that compares both systems on accuracy, grounding, cost and the diagnostics. If only the offline run exists, or any Runs failed, list the shortfall under Incomplete Functionality.
     - _Requirements: 31.6, 31.10_

@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from incident_investigator import cli
 from incident_investigator.cli import main
+from incident_investigator.clock import FakeClock
 from incident_investigator.models.report import InvestigationReport
 from incident_investigator.report.writer import load_report
 
@@ -32,7 +34,10 @@ def snapshot_bytes(root: Path) -> dict[str, bytes]:
 
 
 @pytest.fixture
-def workspace(tmp_path: Path) -> Path:
+def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    # The CLI builds a SystemClock; injected timeouts make the Retry_Policy back off, and tests never
+    # really sleep (tech rules), so CLI runs here get virtual time instead.
+    monkeypatch.setattr(cli, "SystemClock", FakeClock)
     (tmp_path / "scenarios").mkdir()
     spec = REPO / "scenarios" / "bad-config-deploy.json"
     (tmp_path / "scenarios" / spec.name).write_text(spec.read_text())
