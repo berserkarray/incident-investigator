@@ -5,16 +5,21 @@ import json
 
 import httpx2
 import pytest
+from factories import make_incident_report
 
 from incident_investigator.clock import FakeClock
 from incident_investigator.llm.base import LLMCallError, LLMErrorCategory, LLMRequest
 from incident_investigator.llm.factory import ProviderUnavailable, build_llm_client
 from incident_investigator.llm.fake import ScriptedFakeLLM, ScriptEntry
+from incident_investigator.llm.gateway import LLMGateway
 from incident_investigator.llm.offline import OfflineResponder
 from incident_investigator.llm.openai import OpenAIAdapter
 from incident_investigator.llm.retrying import RetryingLLMClient
+from incident_investigator.models.budget import BudgetLimits
 from incident_investigator.models.config import LLMSettings
-from incident_investigator.models.vocab import AgentName, CallKind
+from incident_investigator.models.vocab import AgentName, CallKind, SystemName
+from incident_investigator.state.blackboard import Blackboard
+from incident_investigator.tracing import TraceRecorder
 
 FAKE_KEY = "sk-test-0000000000000000-not-a-real-key"
 SETTINGS = LLMSettings(
@@ -45,6 +50,23 @@ async def test_retryable_errors_back_off_on_the_clock_and_then_succeed(category)
     response = await RetryingLLMClient(fake, clock, SETTINGS).complete(request())
     assert response.text == "{}" and len(fake.prompts) == 3
     assert clock.monotonic() == 1.0 + 1.5  # base 1.0, then 2.0 capped at max_delay 1.5
+    # the retries stay visible: attempts and the failed attempts' categories travel with the response
+    assert response.attempts == 3 and response.retried_errors == (str(category), str(category))
+
+
+async def test_a_retried_call_is_traced_with_its_attempts():
+    clock = FakeClock()
+    trace = TraceRecorder("r", SystemName.MULTI, clock)
+    board = Blackboard("r", "inc", make_incident_report(), clock, trace)
+    fake = ScriptedFakeLLM(
+        [ScriptEntry(AgentName.CRITIC, raise_category=LLMErrorCategory.RATE_LIMIT), ScriptEntry(AgentName.CRITIC, text="{}")],
+        clock,
+    )
+    limits = BudgetLimits(critic_rounds=3, tool_calls=10, tokens=100_000, wall_clock_s=60, reporting_reserve=0)
+    gateway = LLMGateway(RetryingLLMClient(fake, clock, SETTINGS), board, trace, limits, "m")
+    await gateway.raw(request())
+    (event,) = trace.to_trace().of_type("llm_call")
+    assert (event.attempt, event.outcome, event.retried_errors) == (2, "ok", ("rate_limit",))
 
 
 async def test_last_attempt_failure_names_the_category_and_attempts():

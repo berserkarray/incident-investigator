@@ -90,11 +90,13 @@ class LLMGateway:
             "llm_call",
             caller=request.caller,
             call_kind=request.call_kind,
-            attempt=1,
+            attempt=response.attempts,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
-            duration_s=response.duration_s or (time.perf_counter() - started),
+            # the provider's own timing for a single attempt; the whole call, backoff included, after retries
+            duration_s=response.duration_s if response.attempts == 1 and response.duration_s else time.perf_counter() - started,
             outcome="ok",
+            retried_errors=response.retried_errors,
         )
         if self._termination is not None and usage.total_tokens >= self._limits.tokens - self._limits.reporting_reserve:
             self._termination.signal(TerminationReason.TOKEN_BUDGET_EXHAUSTED)

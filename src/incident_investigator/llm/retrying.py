@@ -26,15 +26,21 @@ class RetryingLLMClient:
     async def complete(self, request: LLMRequest) -> LLMResponse:
         attempts = self._settings.max_attempts
         timeout = self._settings.request_timeout_s
+        retried: list[str] = []
         for attempt in range(1, attempts + 1):
             try:
-                return await self._clock.wait_for(self.inner.complete(request), timeout)
+                response = await self._clock.wait_for(self.inner.complete(request), timeout)
+                if not retried:
+                    return response
+                # Keep the retries visible in the Run_Trace (the gateway records attempts per call).
+                return response.model_copy(update={"attempts": attempt, "retried_errors": tuple(retried)})
             except ClockTimeout:
                 error = LLMCallError(LLMErrorCategory.TIMEOUT, f"no response within {timeout:g} s", attempts=attempt)
             except LLMCallError as exc:
                 error = LLMCallError(exc.category, _detail(exc), attempts=attempt)
             if error.category not in RETRYABLE_CATEGORIES or attempt == attempts:
                 raise error
+            retried.append(str(error.category))
             await self._clock.sleep(retry_delay(self._settings, attempt))
         raise AssertionError("unreachable: the last attempt either returns or raises")
 

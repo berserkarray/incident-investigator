@@ -80,6 +80,7 @@ class LLMCallEvent(_Event):
     duration_s: float = Field(ge=0)
     outcome: Literal["ok", "error"]
     error_category: str | None = None
+    retried_errors: tuple[str, ...] = ()  # categories of the failed attempts before a successful one
 
 
 class CitationViolationEvent(_Event):

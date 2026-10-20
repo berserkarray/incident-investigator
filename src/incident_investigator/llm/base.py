@@ -38,6 +38,8 @@ class LLMResponse(StrictModel):
     usage: TokenCount
     provider: Provider
     duration_s: float = Field(0.0, ge=0)
+    attempts: int = Field(1, ge=1)  # set by RetryingLLMClient: total attempts, including the successful one
+    retried_errors: tuple[str, ...] = ()  # error category of each failed attempt before the successful one
 
 
 class LLMErrorCategory(StrEnum):
