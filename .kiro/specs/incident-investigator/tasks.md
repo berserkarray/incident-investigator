@@ -295,7 +295,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
   - [x] 7.7 Complete the OfflineResponder
     - All design D4 rules for `plan`, `specialist_step`, `reasoning` (generic Component scoring and keyword cause table), `critic` (Req 11.6 and 11.17 rules first), `reporting` and `baseline_step` (fixed probe sequence, then a final answer). Every emitted Tool request uses `limit` ≤ 25. It reads only the `<context>` block and imports nothing from `datagen` or `evaluation`.
     - _Requirements: 5.11, 24.8_
-  - [ ] 7.8 Write the OpenAI adapter and the retrying client
+  - [x] 7.8 Write the OpenAI adapter and the retrying client
     - `llm/openai.py`: `AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=0)`; JSON output mode; map `usage.prompt_tokens` / `completion_tokens` to `TokenCount`; map SDK errors to `LLMErrorCategory` with redacted messages.
     - Before writing it, check the current OpenAI docs for `gpt-5.4-mini`: whether it accepts `temperature`, whether it needs `max_completion_tokens` instead of `max_tokens`, and whether Chat Completions or the Responses API is the right endpoint. Record the choice in a code comment and the README.
     - `llm/retrying.py`: `RetryingLLMClient` (retry `RATE_LIMIT`, `SERVER`, `TIMEOUT`; per-attempt `clock.wait_for`; doubling delay capped).
