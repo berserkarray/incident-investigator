@@ -28,7 +28,7 @@ from incident_investigator.evaluation.metrics import (
 )
 from incident_investigator.evaluation.results import format_stat, render_results_markdown
 from incident_investigator.evaluation.runner import run_seed
-from incident_investigator.evaluation.support import SupportCheck
+from incident_investigator.state.support import SupportCheck
 from incident_investigator.models.answer_key import AnswerKey, ExpectedDataGap, RootCauseLabel
 from incident_investigator.models.blackboard import BlackboardState
 from incident_investigator.models.claims import LabelledClaim, LogSignal, ObservabilityClaim
@@ -291,20 +291,20 @@ def test_citation_precision_counts_distinct_pairs_that_pass_the_support_check():
         ),
     )
     assert len(citations(report, ledger)) == 6
-    assert citation_precision(report, ledger, SupportCheck(ledger.incident_report)) == pytest.approx(4 / 6)
+    assert citation_precision(report, ledger, SupportCheck()) == pytest.approx(4 / 6)
 
 
 def test_citation_precision_is_zero_without_citations_and_recall_counts_any_ledger_item():
     ledger = make_ledger()
     report = make_report(Verdict.INCONCLUSIVE, [hyp(1)])
-    assert citation_precision(report, ledger, SupportCheck(ledger.incident_report)) == 0.0  # Req 27.10
+    assert citation_precision(report, ledger, SupportCheck()) == 0.0  # Req 27.10
     assert key_evidence_recall(ledger, label_key()) == 0.5  # log-2 found, chg-1 not; citing is not needed
     assert key_evidence_recall(ledger, insufficient_key()) is None  # Req 27.11
 
 
 def test_support_check_rejects_historical_and_wrong_component_support():
     ledger = make_ledger()
-    check = SupportCheck(ledger.incident_report)
+    check = SupportCheck()
     report = make_report(Verdict.CONCLUSIVE, [hyp(1, "orders-db-456", support=("E0001",)), hyp(2, support=("E0002",))])
     assert citation_precision(report, ledger, check) == 0.0
 

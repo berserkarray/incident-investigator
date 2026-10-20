@@ -18,14 +18,7 @@ from ..models.results import MetricKey, MetricStat, ResultsRow, RunScore
 from ..models.tools import ToolRecord
 from ..models.trace import RunTrace
 from ..models.vocab import SystemName, Verdict
-from .support import (
-    ActionCitation,
-    CitingStatement,
-    ClaimCitation,
-    HypothesisCitation,
-    IncidentClaimCitation,
-    SupportCheck,
-)
+from ..state.support import CitingStatement, HypothesisCitation, IncidentClaimCitation, SupportCheck
 
 ALL_ROW = "ALL"
 DECIMALS = 4
@@ -96,11 +89,16 @@ def over_confident(report: InvestigationReport, key: AnswerKey) -> int:
 # Grounding (Req 27.4, 27.5, 27.10-27.12)
 
 
-def citations(report: InvestigationReport, ledger: BlackboardState) -> dict[tuple[str, str], CitingStatement]:
-    """Every distinct (citing statement, Evidence_ID) pair outside the Evidence appendix."""
-    pairs: dict[tuple[str, str], CitingStatement] = {}
+def citations(report: InvestigationReport, ledger: BlackboardState) -> dict[tuple[str, str], CitingStatement | None]:
+    """Every distinct (citing statement, Evidence_ID) pair outside the Evidence appendix.
 
-    def add(statement_id: str, evidence_ids: Iterable[str], stmt: CitingStatement) -> None:
+    The statement is the ``state.support`` form the Support_Check judges. ``None`` marks a
+    Recommended_Action whose Hypothesis is not in the report: it counts as a citation that is
+    never supported.
+    """
+    pairs: dict[tuple[str, str], CitingStatement | None] = {}
+
+    def add(statement_id: str, evidence_ids: Iterable[str], stmt: CitingStatement | None) -> None:
         for evidence_id in evidence_ids:
             pairs.setdefault((statement_id, evidence_id), stmt)
 
@@ -112,13 +110,24 @@ def citations(report: InvestigationReport, ledger: BlackboardState) -> dict[tupl
     for fact in report.facts:
         # Reporting_Agent summary claims live only in the report: judge them as free-text claims.
         body = bodies.get(fact.claim_id) or ClaimDraft.model_construct(text=fact.text, evidence_ids=fact.evidence_ids)
-        add(f"fact:{fact.claim_id}", fact.evidence_ids, ClaimCitation(body))
+        add(f"fact:{fact.claim_id}", fact.evidence_ids, body)
     components = {h.hypothesis_id: h.component for h in hypotheses}
     for action in report.recommended_actions:
-        add(f"action:{action.action_id}", action.evidence_ids, ActionCitation(components.get(action.hypothesis_id)))
+        # A Recommended_Action citation is judged through its Hypothesis's Component (design D2).
+        component = components.get(action.hypothesis_id)
+        add(
+            f"action:{action.action_id}",
+            action.evidence_ids,
+            HypothesisCitation(component) if component is not None else None,
+        )
+    incident = ledger.incident_report
     for claim in report.claim_statuses:
-        add(f"incident_claim:{claim.claim_id}", claim.corroborating_ids, IncidentClaimCitation(claim.kind))
-        add(f"incident_claim:{claim.claim_id}", claim.contradicting_ids, IncidentClaimCitation(claim.kind, True))
+        for ids, contradicting in ((claim.corroborating_ids, False), (claim.contradicting_ids, True)):
+            add(
+                f"incident_claim:{claim.claim_id}",
+                ids,
+                IncidentClaimCitation(claim.kind, incident.affected_service, incident.start_time, contradicting),
+            )
     return pairs
 
 
@@ -132,7 +141,7 @@ def citation_precision(report: InvestigationReport, ledger: BlackboardState, sup
     valid = 0
     for (_, evidence_id), stmt in pairs.items():
         item = evidence.get(evidence_id)
-        if item is not None and support.supports(stmt, item, retained.get(evidence_id, ())):
+        if stmt is not None and item is not None and support.supports(stmt, item, retained.get(evidence_id, ())):
             valid += 1
     return valid / len(pairs)
 
@@ -193,7 +202,7 @@ def score_run(
     support: SupportChecker | None = None,
     isolation_violations: Sequence[str] = (),
 ) -> RunScore:
-    checker = support if support is not None else SupportCheck(ledger.incident_report)
+    checker = support if support is not None else SupportCheck()
     counts = trace_counts(trace)
     return RunScore(
         scenario=run.scenario,
