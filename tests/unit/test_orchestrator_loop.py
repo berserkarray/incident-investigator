@@ -292,8 +292,8 @@ async def test_timeout_during_reporting_keeps_the_loop_reason(tmp_path):
 async def test_valid_plan_is_used(tmp_path):
     plan = {
         "tasks": [
-            {"task_id": "a", "agent": "observability"},
-            {"task_id": "b", "agent": "dependency"},
+            {"task_id": "a", "agent": "observability", "focus": "errors and latency on checkout"},
+            {"task_id": "b", "agent": "dependency", "focus": "changes before the onset"},
             {"task_id": "c", "agent": "reasoning", "depends_on": ["a", "b"]},
             {"task_id": "d", "agent": "critic", "depends_on": ["c"]},
             {"task_id": "e", "agent": "reporting"},

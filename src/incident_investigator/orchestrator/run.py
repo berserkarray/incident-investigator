@@ -157,7 +157,7 @@ class InvestigatorRun:
             loop_ended=lambda: self.arbiter.ended,
         )
         self.critic_loop = CriticLoop(self.limits.critic_rounds, self.factory)
-        self.planner = Planner(self.gateway, self.trace, self.config.orchestrator.max_initial_tasks_per_specialist)
+        self.planner = Planner(self.gateway, self.trace, self.config.orchestrator, self.snapshot.component_names)
 
     def _elapsed(self) -> float:
         return self.clock.monotonic() - self._started

@@ -1,5 +1,6 @@
 """Task_Graph, plan validation and fallback, and Scheduler dispatch (Req 6.1-6.9, 7.1-7.3, 7.5, 16.1, 16.2, 16.5)."""
 
+import itertools
 import json
 from typing import Any
 
@@ -12,6 +13,7 @@ from incident_investigator.clock import FakeClock
 from incident_investigator.llm.fake import ScriptedFakeLLM, ScriptEntry
 from incident_investigator.llm.gateway import LLMGateway
 from incident_investigator.models.budget import BudgetLimits
+from incident_investigator.models.config import OrchestratorSettings
 from incident_investigator.models.outputs import PlanOutput
 from incident_investigator.models.tasks import Task
 from incident_investigator.models.vocab import AgentName, CallKind, FailureKind, SystemName, TaskKind, TaskState
@@ -24,8 +26,15 @@ from incident_investigator.tracing import TraceRecorder
 OBS, DEP, REA, CRI, REP = "observability", "dependency", "reasoning", "critic", "reporting"
 
 
+FOCUS = itertools.count(1)
+
+
 def planned(task_id: str, agent: str, *deps: str) -> dict[str, Any]:
-    return {"task_id": task_id, "agent": agent, "depends_on": list(deps)}
+    """A planned Task. Specialist Tasks need a distinct, non-blank focus (agents/planner.plan_check)."""
+    task = {"task_id": task_id, "agent": agent, "depends_on": list(deps)}
+    if agent in (OBS, DEP):
+        task["focus"] = f"{task_id} evidence {next(FOCUS)}"
+    return task
 
 
 GOOD_PLAN = [
@@ -109,7 +118,7 @@ def gateway_with(entries):
 )
 async def test_planner_falls_back_to_the_default_graph_with_a_trace_event(entries, cause):
     gateway, trace = gateway_with(entries)
-    graph, fallback = await Planner(gateway, trace, max_initial=2).plan(make_incident_report(), TaskFactory())
+    graph, fallback = await Planner(gateway, trace, OrchestratorSettings(max_initial_tasks_per_specialist=2)).plan(make_incident_report(), TaskFactory())
     assert fallback == cause
     assert [t.agent.value for t in graph] == [OBS, DEP, REA, CRI, REP]
     (event,) = trace.to_trace().of_type("default_graph_fallback")
@@ -118,7 +127,7 @@ async def test_planner_falls_back_to_the_default_graph_with_a_trace_event(entrie
 
 async def test_planner_uses_a_valid_plan():
     gateway, trace = gateway_with([ScriptEntry(AgentName.ORCHESTRATOR, CallKind.PLAN, text=json.dumps({"tasks": GOOD_PLAN}))])
-    graph, fallback = await Planner(gateway, trace, max_initial=2).plan(make_incident_report(), TaskFactory())
+    graph, fallback = await Planner(gateway, trace, OrchestratorSettings(max_initial_tasks_per_specialist=2)).plan(make_incident_report(), TaskFactory())
     assert fallback is None and len(graph) == 6
     assert not trace.to_trace().of_type("default_graph_fallback")
 
