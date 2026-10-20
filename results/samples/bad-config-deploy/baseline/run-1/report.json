@@ -18,8 +18,8 @@
       "rank": 1,
       "revision": 1,
       "component": "reviews-0ee",
-      "cause_type": "config_error",
-      "statement": "The 00:34 UTC reduction of db.pool.max_connections to 5 caused connection starvation in reviews-0ee, driving the 5xx spike and latency increase.",
+      "cause_type": "connection_pool_exhaustion",
+      "statement": "The reviews service is failing because a config change reduced db.pool.max_connections from 50 to 5 shortly before the error spike, likely exhausting the database connection pool and causing elevated 5xx and latency.",
       "supporting_evidence_ids": [
         "E0002",
         "E0003"
@@ -30,17 +30,18 @@
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Logs or metrics showing DB connection exhaustion, timeouts, or pool wait saturation after the config change.",
-          "suggested_tool": "query_logs"
+          "description": "Direct telemetry showing db connection saturation or pool exhaustion around the incident start (e.g., db_connections for reviews-0ee or related backend).",
+          "suggested_tool": "query_metrics"
         },
         {
-          "description": "DB connection metric trend around the incident window to confirm saturation.",
-          "suggested_tool": "query_metrics"
+          "description": "Service logs around the onset containing connection timeout / pool exhaustion messages.",
+          "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "Error rate jumped from ~0.3-0.5% to 32% starting at 00:50 UTC.",
-        "The only recent change found for reviews-0ee was a pool-size reduction 16 minutes before onset."
+        "Error rate jumps from ~0.3-0.5% to 32% starting at 00:50",
+        "Config change at 00:34 reduced db.pool.max_connections from 50 to 5",
+        "No matching error/warn logs were returned in the initial window"
       ]
     },
     {
@@ -48,29 +49,25 @@
       "rank": 2,
       "revision": 1,
       "component": "reviews-0ee",
-      "cause_type": "connection_pool_exhaustion",
-      "statement": "The service exhausted its database connection pool after the max_connections reduction, causing request failures and high latency.",
+      "cause_type": "config_error",
+      "statement": "A bad configuration change on reviews-0ee caused the incident, with the pool-size reduction being the specific misconfiguration.",
       "supporting_evidence_ids": [
-        "E0002",
-        "E0003"
+        "E0003",
+        "E0002"
       ],
       "contradicting_evidence_ids": [],
-      "confidence": 0.72,
-      "raw_confidence": 0.72,
+      "confidence": 0.16,
+      "raw_confidence": 0.16,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Direct evidence of pool exhaustion or connection acquisition failures in logs.",
+          "description": "Evidence that the config change alone, rather than downstream saturation, explains the failures.",
           "suggested_tool": "query_logs"
-        },
-        {
-          "description": "DB connections metric to show the pool or database was saturated.",
-          "suggested_tool": "query_metrics"
         }
       ],
       "contributing_factors": [
-        "The timing strongly matches the config change.",
-        "The symptom pattern is consistent with request queuing and failures."
+        "A config change occurred 16 minutes before the observed spike",
+        "The change directly altered a database pool setting"
       ]
     },
     {
@@ -78,31 +75,25 @@
       "rank": 3,
       "revision": 1,
       "component": "reviews-0ee",
-      "cause_type": "dependency_timeout",
-      "statement": "An upstream dependency of reviews-0ee began timing out, and the service's elevated 5xx/latency are downstream symptoms rather than the root cause.",
+      "cause_type": "deploy_regression",
+      "statement": "A recent deployment to reviews-0ee introduced the failures, and the config change is coincidental.",
       "supporting_evidence_ids": [
-        "E0004",
         "E0002"
       ],
       "contradicting_evidence_ids": [
         "E0003"
       ],
-      "confidence": 0.18,
-      "raw_confidence": 0.18,
+      "confidence": 0.04,
+      "raw_confidence": 0.04,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Logs or metrics from upstream dependencies during the incident window.",
-          "suggested_tool": "query_logs"
-        },
-        {
-          "description": "Latency/error metrics for dependencies to identify a failing upstream component.",
-          "suggested_tool": "query_metrics"
+          "description": "Deployment records for reviews-0ee near the incident start showing a code rollout or rollback.",
+          "suggested_tool": "get_deployments"
         }
       ],
       "contributing_factors": [
-        "reviews-0ee depends on checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54.",
-        "No dependency telemetry was checked yet, so upstream failure remains possible."
+        "Symptoms begin after a recent change window"
       ]
     },
     {
@@ -110,76 +101,64 @@
       "rank": 4,
       "revision": 1,
       "component": "reviews-0ee",
-      "cause_type": "deploy_regression",
-      "statement": "A recent deployment or code change in reviews-0ee introduced a regression that caused the outage.",
+      "cause_type": "dependency_timeout",
+      "statement": "An upstream dependency of reviews-0ee is timing out and causing the elevated 5xx/latency, independent of the config change.",
+      "supporting_evidence_ids": [
+        "E0004",
+        "E0002"
+      ],
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.02,
+      "raw_confidence": 0.02,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Dependency-specific telemetry or logs showing timeout/error spikes in an upstream component around the incident start.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "reviews-0ee depends on checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e",
+        "Upstream issues can manifest as elevated latency and 5xx"
+      ]
+    },
+    {
+      "hypothesis_id": "H5",
+      "rank": 5,
+      "revision": 1,
+      "component": "reviews-0ee",
+      "cause_type": "resource_exhaustion",
+      "statement": "The service is experiencing a generic resource exhaustion unrelated to the database pool setting.",
       "supporting_evidence_ids": [
         "E0002"
       ],
       "contradicting_evidence_ids": [
         "E0003"
       ],
-      "confidence": 0.05,
-      "raw_confidence": 0.05,
+      "confidence": 0.0,
+      "raw_confidence": 0.0,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Deployment history for reviews-0ee in the hours before onset.",
-          "suggested_tool": "get_deployments"
-        },
-        {
-          "description": "Error logs indicating application-level exceptions tied to a new build.",
-          "suggested_tool": "query_logs"
+          "description": "Metrics for CPU, memory, disk, or request rate showing a non-database resource bottleneck.",
+          "suggested_tool": "query_metrics"
         }
       ],
       "contributing_factors": [
-        "The service is clearly degraded, but no deployment was found in the recent change window.",
-        "The only observed change was a config change, not a deployment."
+        "Sustained 32% error rate could reflect a resource bottleneck"
       ]
     }
   ],
   "superseded_hypotheses": [],
-  "facts": [
-    {
-      "claim_id": "F001",
-      "producer": "baseline",
-      "text": "The incident report's affected service is reviews-0ee.",
-      "evidence_ids": [
-        "E0002",
-        "E0003",
-        "E0004"
-      ]
-    },
-    {
-      "claim_id": "F002",
-      "producer": "baseline",
-      "text": "The incident started at 2024-01-18T00:50:00Z.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F003",
-      "producer": "baseline",
-      "text": "HTTP 5xx rate on reviews-0ee rose sharply above normal and stayed elevated after 00:50 UTC.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F004",
-      "producer": "baseline",
-      "text": "A config change at 00:34 UTC reduced db.pool.max_connections from 50 to 5 on reviews-0ee.",
-      "evidence_ids": [
-        "E0003"
-      ]
-    }
-  ],
+  "facts": [],
   "assumptions": [],
   "data_gaps": [],
   "recommended_actions": [
     {
       "action_id": "A1",
-      "text": "Inspect logs and DB connection metrics around 00:34-02:20 UTC for pool wait time, connection acquisition failures, and timeout patterns to confirm whether the reduced max_connections caused saturation.",
+      "text": "Check database connection saturation and pool wait/timeout telemetry for reviews-0ee around 00:34-00:50 UTC to confirm or refute connection pool exhaustion.",
       "category": "further_investigation",
       "hypothesis_id": "H1",
       "evidence_ids": [
@@ -190,34 +169,42 @@
     },
     {
       "action_id": "A2",
-      "text": "Verify whether the database or client pool hit its connection ceiling after the config change, and compare against request latency/error spikes to confirm exhaustion.",
-      "category": "further_investigation",
-      "hypothesis_id": "H2",
+      "text": "If the pool-size reduction is still in effect, restore db.pool.max_connections to the prior safe value and monitor error rate and latency.",
+      "category": "mitigation",
+      "hypothesis_id": "H1",
       "evidence_ids": [
-        "E0002",
-        "E0003"
+        "E0003",
+        "E0002"
       ],
       "producer": "baseline"
     },
     {
       "action_id": "A3",
-      "text": "Check upstream dependency logs and metrics for checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54 during the incident window to rule out a dependency timeout.",
-      "category": "further_investigation",
-      "hypothesis_id": "H3",
+      "text": "Review the config pipeline change to db.pool.max_connections and add guardrails/validation to prevent unsafe reductions.",
+      "category": "fix",
+      "hypothesis_id": "H2",
       "evidence_ids": [
-        "E0002",
-        "E0004"
+        "E0003"
       ],
       "producer": "baseline"
     },
     {
       "action_id": "A4",
-      "text": "Review deployment history and application logs for reviews-0ee to rule out a coincident deploy regression.",
+      "text": "Inspect deployment history for reviews-0ee around the incident window to rule in or out a rollout-related regression.",
+      "category": "further_investigation",
+      "hypothesis_id": "H3",
+      "evidence_ids": [
+        "E0002"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A5",
+      "text": "Query upstream dependency metrics/logs for checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e to check for timeout-driven failures.",
       "category": "further_investigation",
       "hypothesis_id": "H4",
       "evidence_ids": [
-        "E0002",
-        "E0003"
+        "E0004"
       ],
       "producer": "baseline"
     }
@@ -251,7 +238,8 @@
       "text": "The affected service is reviews-0ee.",
       "status": "verified",
       "corroborating_ids": [
-        "E0002"
+        "E0002",
+        "E0003"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -262,7 +250,8 @@
       "text": "The incident started at 2024-01-18T00:50:00+00:00.",
       "status": "verified",
       "corroborating_ids": [
-        "E0002"
+        "E0002",
+        "E0003"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -272,69 +261,57 @@
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H1",
-      "description": "Logs or metrics showing DB connection exhaustion, timeouts, or pool wait saturation after the config change.",
+      "description": "Direct telemetry showing db connection saturation or pool exhaustion around the incident start (e.g., db_connections for reviews-0ee or related backend).",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H1",
-      "description": "DB connection metric trend around the incident window to confirm saturation.",
+      "description": "Service logs around the onset containing connection timeout / pool exhaustion messages.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H2",
-      "description": "Direct evidence of pool exhaustion or connection acquisition failures in logs.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H2",
-      "description": "DB connections metric to show the pool or database was saturated.",
+      "description": "Evidence that the config change alone, rather than downstream saturation, explains the failures.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H3",
-      "description": "Logs or metrics from upstream dependencies during the incident window.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H3",
-      "description": "Latency/error metrics for dependencies to identify a failing upstream component.",
+      "description": "Deployment records for reviews-0ee near the incident start showing a code rollout or rollback.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H4",
-      "description": "Deployment history for reviews-0ee in the hours before onset.",
+      "description": "Dependency-specific telemetry or logs showing timeout/error spikes in an upstream component around the incident start.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
-      "hypothesis_id": "H4",
-      "description": "Error logs indicating application-level exceptions tied to a new build.",
+      "hypothesis_id": "H5",
+      "description": "Metrics for CPU, memory, disk, or request rate showing a non-database resource bottleneck.",
       "ref": null
     }
   ],
   "budget_usage": {
     "tool_calls": {
-      "used": 4.0,
+      "used": 5.0,
       "limit": 60.0
     },
     "tokens": {
-      "used": 9433.0,
+      "used": 18188.0,
       "limit": 400000.0
     },
-    "input_tokens": 8096,
-    "output_tokens": 1337,
+    "input_tokens": 16766,
+    "output_tokens": 1422,
     "critic_rounds": {
       "used": 0.0,
       "limit": 3.0
     },
     "wall_clock_s": {
-      "used": 5.649,
+      "used": 7.942,
       "limit": 900.0
     }
   },
@@ -518,6 +495,31 @@
         "truncated": false
       },
       "reliability": "partial"
+    },
+    {
+      "evidence_id": "E0005",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "reviews-0ee",
+        "metric_name": "db_connections",
+        "time_range": {
+          "start": "2024-01-18T00:20:00Z",
+          "end": "2024-01-18T02:20:00Z"
+        },
+        "step_seconds": 300
+      },
+      "observation": {
+        "record_count": 0,
+        "time_span": null,
+        "top_values": [],
+        "key_attributes": {},
+        "metric_stats": null,
+        "note": "no records matched",
+        "truncated": false
+      },
+      "reliability": "complete"
     }
   ]
 }

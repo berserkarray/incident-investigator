@@ -18,57 +18,57 @@
 
 ## Hypotheses
 
-### Rank 1: `H2` reviews-0ee / connection_pool_exhaustion
+### Rank 1: `H1` reviews-0ee / connection_pool_exhaustion
 
-- Confidence: 0.90 (before data-gap penalty: 0.90)
-- Revision: 2
-- Statement: reviews-0ee likely exhausted its database connection pool after the pool limit was reduced from 50 to 5, causing request queuing, elevated latency, and 5xx errors.
-- Supporting evidence: `E0003`, `E0005`, `E0007`
+- Confidence: 0.86 (before data-gap penalty: 0.86)
+- Revision: 1
+- Statement: A config change on reviews-0ee reduced db.pool.max_connections from 50 to 5, causing connection pool exhaustion that drove the 5xx spike and latency increase.
+- Supporting evidence: `E0003`, `E0002`, `E0005`
 - Contradicting evidence: none
 - Evidence sufficient: no
-- Contributing factors: Config change reduced db.pool.max_connections from 50 to 5 shortly before symptoms, Repeated log errors report timed out waiting for a database connection, p99 latency rose sharply in the same window
+- Contributing factors: Directly affected the incident service, Timing is close to observed onset, Explains both elevated errors and latency
 - Missing evidence:
-  - Direct pool saturation evidence such as pool waiters, connection acquisition latency, or exhausted connection counts at the incident onset.
-  - Additional logs or traces showing request queuing or repeated connection acquisition failures immediately after the config change.
+  - Current database connection pool saturation metrics or wait-time evidence around 00:34-00:50Z
+  - Application logs showing connection acquisition timeouts or pool exhaustion errors
 
-### Rank 2: `H1` reviews-0ee / config_error
+### Rank 2: `H2` reviews-0ee / config_error
 
-- Confidence: 0.84 (before data-gap penalty: 0.84)
-- Revision: 2
-- Statement: A configuration change on reviews-0ee mis-sized the database pool, and the resulting config error directly caused the incident symptoms.
-- Supporting evidence: `E0003`, `E0005`, `E0007`
+- Confidence: 0.67 (before data-gap penalty: 0.67)
+- Revision: 1
+- Statement: The incident was caused by an erroneous configuration change on reviews-0ee, with the reduced database pool limit being the triggering misconfiguration rather than a deeper code or dependency fault.
+- Supporting evidence: `E0003`, `E0002`
 - Contradicting evidence: none
 - Evidence sufficient: no
-- Contributing factors: Recent config change is the only observed change near onset, Timeout errors appeared after the change, Latency and error rate both worsened after the change
+- Contributing factors: Confirmed config change on the affected service, Error rate rose after the change
 - Missing evidence:
-  - Evidence that the new pool setting was intended and safe for expected traffic, or that another config parameter also changed.
-  - Metrics or traces tying the config change to request queuing and 5xx generation rather than a coincidental timing overlap.
+  - Evidence that the config change alone, rather than another concurrent issue, explains the full error and latency pattern
+  - Rollback or comparison data showing behavior before and after the config change
 
-### Rank 3: `H3` reviews-0ee / dependency_timeout
+### Rank 3: `H3` reviews-0ee / resource_exhaustion
 
-- Confidence: 0.28 (before data-gap penalty: 0.28)
-- Revision: 2
-- Statement: An upstream dependency of reviews-0ee intermittently timed out, and reviews-0ee surfaced those failures as 5xx and higher latency.
-- Supporting evidence: `E0004`, `E0002`
-- Contradicting evidence: `E0005`
-- Evidence sufficient: no
-- Contributing factors: reviews-0ee has several upstream dependencies that could fail independently, Observed symptoms could be secondary to upstream slowness
-- Missing evidence:
-  - Current logs or traces showing timeout failures to checkout-23b, media-bbe, session-cache-8e3, or geo-api-38e around onset.
-  - Dependency-specific latency or error metrics demonstrating an upstream outage or slowdown at the same time.
-
-### Rank 4: `H4` reviews-0ee / code_defect
-
-- Confidence: 0.20 (before data-gap penalty: 0.20)
-- Revision: 2
-- Statement: The config change exposed or triggered an application bug in reviews-0ee's database handling, leading to connection timeout failures and elevated 5xx/latency.
+- Confidence: 0.54 (before data-gap penalty: 0.54)
+- Revision: 1
+- Statement: Reducing max database connections to 5 may have created an internal resource bottleneck on reviews-0ee, leading to request queuing and elevated latency with secondary 5xxs.
 - Supporting evidence: `E0003`, `E0005`
 - Contradicting evidence: none
 - Evidence sufficient: no
-- Contributing factors: Timeouts may reflect an application-level handling issue, No code deployment evidence is currently present
+- Contributing factors: Explains latency spike well, Could manifest as partial error increase under load
 - Missing evidence:
-  - Stack traces or application error details indicating a code path bug rather than pure resource shortage.
-  - Deployment or code-change evidence showing a recent application change correlated with the onset.
+  - Thread/worker saturation or request queue depth metrics for reviews-0ee during the incident window
+  - Logs or traces showing requests blocked waiting on internal resources
+
+### Rank 4: `H4` reviews-0ee / dependency_timeout
+
+- Confidence: 0.22 (before data-gap penalty: 0.22)
+- Revision: 1
+- Statement: An upstream dependency of reviews-0ee may have slowed or timed out, and the service change merely coincided with the onset of the incident.
+- Supporting evidence: `E0004`, `E0002`, `E0005`
+- Contradicting evidence: `E0003`
+- Evidence sufficient: no
+- Contributing factors: reviews-0ee depends on several upstream services and a third-party API, Upstream issues can produce both latency and 5xxs
+- Missing evidence:
+  - Dependency-specific latency/error metrics for checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54 around the incident window
+  - Logs or traces identifying which upstream call path timed out
 
 ## Superseded Hypotheses
 
@@ -76,22 +76,14 @@ _No entries._
 
 ## Facts
 
-- `F001` (observability): reviews-0ee error_rate jumped from a baseline around 0.003-0.005 to 0.32 starting at 2024-01-18T00:40Z and stayed at 0.32 through the queried range. [`E0002`]
-- `F002` (observability): No error or warn log records matched the queried reviews-0ee window, so logs did not show a detectable change in that range. [`E0001`]
-- `F003` (dependency): reviews-0ee had a config change at 2024-01-18T00:34:00Z setting db.pool.max_connections from 50 to 5; this is on the affected service itself and directly in its database access path, making it the most relevant recent dependency-related change near the incident start. [`E0003`]
-- `F004` (dependency): reviews-0ee depends upstream on checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e, and has downstream front-lb-b54; this places the affected service in a path where upstream issues could also surface as reviews-0ee errors, but no recent change in those dependencies is evidenced here. [`E0004`]
-- `F005` (observability): reviews-0ee error_rate rose sharply and peaked at 0.32 at 2024-01-18T00:40:00Z, consistent with the reported 5xx surge. [`E0002`]
-- `F006` (observability): reviews-0ee began emitting repeated error logs for database connection acquisition timeouts starting at 2024-01-18T00:46:06.458639Z, which supports request queuing/pool exhaustion after the pool size reduction. [`E0005`]
-- `F007` (observability): A config change on reviews-0ee set db.pool.max_connections from 50 to 5 at 2024-01-18T00:34:00Z, and connection-timeout errors appeared shortly afterward, making the config change a plausible trigger for the elevated 5xx/latency symptoms. [`E0003`, `E0005`]
-- `F008` (observability): reviews-0ee shows a sharp increase in p99 latency starting at 2024-01-18T00:45:00Z, rising from ~170-190 ms to 1041.2161 ms and staying there through the queried range. [`E0007`]
-- `F009` (observability): reviews-0ee shows elevated error_rate beginning by 2024-01-18T00:40:00Z, reaching 0.32 at peak in the queried window. [`E0002`]
-- `F010` (observability): reviews-0ee logs show error-level request failures with the pattern 'timed out waiting for a database connection' starting at 2024-01-18T00:46:06.458639Z. [`E0005`]
-- `F011` (observability): reviews-0ee had a config change at 2024-01-18T00:34:00Z that set db.pool.max_connections from 50 to 5, which is temporally close to the onset of the latency and timeout symptoms. [`E0003`]
-- `F012` (reporting): reviews-0ee error_rate jumped from a baseline around 0.003-0.005 to 0.32 starting at 2024-01-18T00:40:00Z and stayed elevated through the queried range. [`E0002`]
-- `F013` (reporting): The service had a config change at 2024-01-18T00:34:00Z setting db.pool.max_connections from 50 to 5. [`E0003`]
-- `F014` (reporting): Repeated error logs reported timed out waiting for a database connection starting at 2024-01-18T00:46:06.458639Z. [`E0005`]
-- `F015` (reporting): p99 latency rose sharply to 1041.2161 ms at 2024-01-18T00:45:00Z and remained elevated. [`E0007`]
-- `F016` (reporting): The evidence most strongly supports connection-pool exhaustion or mis-sizing on reviews-0ee as the incident driver. [`E0003`, `E0005`, `E0007`]
+- `F001` (dependency): reviews-0ee had a config change at 2024-01-18T00:34:00Z that reduced db.pool.max_connections from 50 to 5 on the affected service itself, which is a plausible direct contributor to elevated 5xx/latency near the incident start. [`E0003`]
+- `F002` (dependency): reviews-0ee is downstream of front-lb-b54 and upstream of checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e; these are the relevant dependency-path components to inspect for upstream or adjacent failures affecting reviews-0ee. [`E0004`]
+- `F003` (observability): reviews-0ee error_rate changed from a low baseline to sustained 32% errors, with onset at 2024-01-18T00:40:00Z and clearly elevated by 00:50Z. [`E0002`]
+- `F004` (observability): reviews-0ee latency_p99_ms spiked from normal levels to over 1s, with onset at 2024-01-18T00:45:00Z and sustained elevation from 00:50Z onward. [`E0005`]
+- `F005` (reporting): reviews-0ee error_rate rose from a low baseline to a sustained 32% during the incident window. [`E0002`]
+- `F006` (reporting): reviews-0ee p99 latency exceeded 1 second shortly after the error spike began. [`E0005`]
+- `F007` (reporting): A config change on reviews-0ee reduced db.pool.max_connections from 50 to 5 shortly before the incident. [`E0003`]
+- `F008` (reporting): reviews-0ee depends on front-lb-b54 and has downstream/upstream relationships that should be considered when validating the incident path. [`E0004`]
 
 ## Assumptions
 
@@ -103,21 +95,20 @@ _No entries._
 
 ## Recommended Actions
 
-- `A1` [fix] for `H2`: Restore the database connection pool to a safe value and validate the service under expected traffic; the pool reduction from 50 to 5 is the most plausible trigger for the observed connection-timeout errors, latency spike, and 5xx surge. (evidence: `E0003`, `E0005`, `E0007`)
-- `A2` [mitigation] for `H2`: If the service is still degraded, temporarily increase available database connections or roll back the pool limit change to relieve request queuing and connection-acquisition timeouts. (evidence: `E0005`, `E0007`)
-- `A3` [prevention] for `H1`: Add a deployment/configuration guardrail for db.pool.max_connections changes, including approval, safe defaults, and automated checks that block reductions likely to exhaust the pool under normal load. (evidence: `E0003`, `E0005`, `E0007`)
-- `A4` [prevention] for `H1`: Add alerting and dashboards for connection-pool saturation signals, including pool wait time, exhausted connections, and request timeout rates, so future mis-sizing is detected before 5xx errors rise. (evidence: `E0003`, `E0005`, `E0007`)
-- `A5` [further_investigation] for `H3`: Verify whether any upstream dependency of reviews-0ee was slow or failing at incident onset by checking dependency-specific logs and metrics for checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e. (evidence: `E0004`)
-- `A6` [further_investigation] for `H4`: Review application traces and stack details for the connection-timeout path to rule out an underlying code defect that could have been exposed by the pool-size change. (evidence: `E0003`, `E0005`)
+- `A1` [fix] for `H1`: Restore db.pool.max_connections on reviews-0ee to a safe operating value and validate database capacity before reapplying any lower limit; the observed error-rate and latency spike followed the reduction to 5 connections. (evidence: `E0003`, `E0002`, `E0005`)
+- `A2` [mitigation] for `H1`: If connection saturation recurs, temporarily increase the pool limit and/or scale database capacity for reviews-0ee to relieve request blocking while the root cause is corrected. (evidence: `E0003`, `E0002`, `E0005`)
+- `A3` [prevention] for `H2`: Add a configuration review and change-guardrail for database pool settings on reviews-0ee so reductions in max_connections require explicit capacity checks and approval before rollout. (evidence: `E0003`, `E0002`)
+- `A4` [prevention] for `H3`: Add alerting and dashboards for connection pool utilization, request queue depth, and worker/thread saturation on reviews-0ee so resource bottlenecks are detected before they drive 5xxs and latency spikes. (evidence: `E0003`, `E0005`)
+- `A5` [further_investigation] for `H4`: Inspect dependency latency/error metrics and traces for front-lb-b54, checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e around the incident window to conclusively rule out an upstream timeout path. (evidence: `E0004`, `E0002`, `E0005`)
 
 ## Incident Report Claims
 
 | Claim | Text | Status | Corroborating | Contradicting |
 |---|---|---|---|---|
 | `IC1` | HTTP 5xx rate on reviews-0ee above 25% | verified | `E0002` | none |
-| `IC2` | p99 latency on reviews-0ee several times above normal | verified | `E0007` | none |
-| `IC3` | The affected service is reviews-0ee. | verified | `E0002`, `E0003` | none |
-| `IC4` | The incident started at 2024-01-18T00:50:00+00:00. | contradicted | none | `E0002`, `E0003` |
+| `IC2` | p99 latency on reviews-0ee several times above normal | verified | `E0005` | none |
+| `IC3` | The affected service is reviews-0ee. | verified | `E0002`, `E0005` | none |
+| `IC4` | The incident started at 2024-01-18T00:50:00+00:00. | unverified | none | none |
 
 ## Missing Evidence
 
@@ -127,10 +118,10 @@ _No entries._
 
 | Budget | Used | Limit |
 |---|---|---|
-| Tool calls | 7 | 60 |
-| Tokens (input 46361, output 4857) | 51218 | 400000 |
-| Critic rounds | 2 | 3 |
-| Wall-clock seconds | 25.188 | 900 |
+| Tool calls | 6 | 60 |
+| Tokens (input 28999, output 2524) | 31523 | 400000 |
+| Critic rounds | 1 | 3 |
+| Wall-clock seconds | 14.76 | 900 |
 
 ## Evidence Appendix
 
@@ -170,26 +161,11 @@ _No entries._
 - component: checkout-23b, front-lb-b54, geo-api-38e, mail-queue-53f, media-bbe
 - direction: downstream, upstream
 
-### `E0005` query_logs (complete)
+### `E0005` query_metrics (complete)
 
-- Query: `{"attributes":null,"levels":["error","warn"],"limit":25,"service":"reviews-0ee","text":null,"time_range":{"end":"2024-01-18T01:10:00Z","start":"2024-01-18T00:34:00Z"},"tool":"query_logs"}`
-- Records: 16
-- Time span: 2024-01-18T00:46:06.458639+00:00 – 2024-01-18T01:08:37.687487+00:00
-  - error reviews-0ee: request failed: timed out waiting for a database connection (pool size #) (x16)
-- level: error
-- service: reviews-0ee
-
-### `E0006` query_metrics (complete)
-
-- Query: `{"limit":25,"metric_name":"db_connections","service":"reviews-0ee","step_seconds":300,"time_range":{"end":"2024-01-18T01:20:00Z","start":"2024-01-18T00:20:00Z"},"tool":"query_metrics"}`
-- Records: 0
-- Note: no records matched
-
-### `E0007` query_metrics (complete)
-
-- Query: `{"limit":25,"metric_name":"latency_p99_ms","service":"reviews-0ee","step_seconds":300,"time_range":{"end":"2024-01-18T01:20:00Z","start":"2024-01-18T00:20:00Z"},"tool":"query_metrics"}`
-- Records: 12
-- Time span: 2024-01-18T00:20:00+00:00 – 2024-01-18T01:15:00+00:00
-  - latency_p99_ms reviews-0ee (x12)
+- Query: `{"limit":25,"metric_name":"latency_p99_ms","service":"reviews-0ee","step_seconds":300,"time_range":{"end":"2024-01-18T01:10:00Z","start":"2024-01-18T00:40:00Z"},"tool":"query_metrics"}`
+- Records: 6
+- Time span: 2024-01-18T00:40:00+00:00 – 2024-01-18T01:05:00+00:00
+  - latency_p99_ms reviews-0ee (x6)
 - metric_name: latency_p99_ms
 - service: reviews-0ee

@@ -212,53 +212,64 @@ Scoring uses the answer key's structured fields only (no LLM judge). Top-1 count
 
 - Command: `incident-investigator eval --config config.toml --out runs/eval-full --runs 3`. The two Results_Tables were then copied from `runs/eval-full/` (git-ignored) to [`results/`](results/).
 - Provider and model: OpenAI `gpt-5.4-mini`. Seed: `42`. Date: 2026-10-20.
-- Code: commit `625913d3b8c24ed0bbfe1fe201ed5e867f59b353`.
-- 12 scenarios × 2 systems × 3 Runs = 72 Runs: 0 failed, 0 isolation violations, 0 LLM retries, 0 output files containing the API key. There were 24 repair prompts (21 multi-agent, 3 baseline) and 1 agent failure, which its retry recovered.
-- Multi-agent Runs ended with `critic_accepted` 24 times, `duplicate_requests_only` 8 and `max_critic_rounds` 4, after 1.9 Critic rounds on average. Every baseline Run ended with `final_answer`.
-- Wall time 20 min 43 s. About $3.70 at list price ($0.75 per 1M input tokens and $4.50 per 1M output tokens, no cached-input discount): $3.19 multi-agent, $0.51 baseline.
+- Code: commit `f9163c069a24a647cb76a3e9ffc924390518cbf8`. The first evaluation (v1, commit `625913d`) is kept in git at tag `v1-submittable`.
+- 12 scenarios × 2 systems × 3 Runs = 72 Runs: 0 failed, 0 isolation violations, 0 LLM retries, 0 output files containing the API key. There were 32 repair prompts (26 multi-agent, 6 baseline) and 3 agent failures, all first attempts that their retry recovered.
+- Multi-agent Runs ended with `critic_accepted` 28 times, `max_critic_rounds` 5 and `duplicate_requests_only` 3, after 1.7 Critic rounds on average. Every baseline Run ended with `final_answer`.
+- Wall time 20 min 18 s. About $3.54 at list price ($0.75 per 1M input tokens and $4.50 per 1M output tokens, no cached-input discount): $2.52 multi-agent, $1.02 baseline.
+
+### Changes since v1
+
+- **Baseline:** a baseline-only rule (not part of the shared checklist): while tool calls remain, request the evidence you would list as missing before declaring inconclusive. In v1 the baseline answered on step 1 in all 36 Runs.
+- **Every prompt:** only evidence IDs (`E…`) may be cited as evidence. Board-backed prompts now label finding (`F…`) and Data_Gap (`G…`) IDs distinctly. In v1, 249 of the 254 removed citations were finding or gap IDs in evidence fields. This changed the multi-agent prompts too.
+- **Req 12.4:** mitigation, fix and prevention actions are now checked on the evidence IDs that survive citation validation. Neither evaluation had an action left without evidence, so this fix does not affect the numbers.
 
 ### Results
 
-Mean ± sample standard deviation over 36 Runs per system ([full table](results/results.md)):
+Mean ± sample standard deviation over 36 Runs per system ([full table](results/results.md)), with v1 for comparison:
 
-| Metric | Multi-agent | Baseline |
-|---|---|---|
-| Top-1 accuracy | 0.42 ± 0.50 | 0.14 ± 0.35 |
-| Top-3 accuracy | 0.50 ± 0.51 | 0.14 ± 0.35 |
-| Ranking hit@3 (diagnostic) | 0.73 ± 0.45 | 0.64 ± 0.49 |
-| Over-cautious rate (diagnostic) | 0.08 ± 0.28 | 0.36 ± 0.49 |
-| Over-confident rate (diagnostic) | 0.28 ± 0.45 | 0.00 ± 0.00 |
-| Citation precision | 0.80 ± 0.08 | 0.86 ± 0.09 |
-| Key evidence recall | 0.48 ± 0.37 | 0.25 ± 0.36 |
-| Tool calls | 9.6 ± 5.0 | 4.3 ± 0.7 |
-| Latency (s) | 27.5 ± 11.8 | 7.0 ± 3.0 |
-| Total tokens | 82,743 ± 45,144 | 11,405 ± 3,758 |
+| Metric | Multi-agent | Baseline | Multi-agent v1 | Baseline v1 |
+|---|---|---|---|---|
+| Top-1 accuracy | 0.47 ± 0.51 | 0.47 ± 0.51 | 0.42 | 0.14 |
+| Top-3 accuracy | 0.58 ± 0.50 | 0.53 ± 0.51 | 0.50 | 0.14 |
+| Ranking hit@3 (diagnostic) | 0.70 ± 0.47 | 0.73 ± 0.45 | 0.73 | 0.64 |
+| Over-cautious rate (diagnostic) | 0.03 ± 0.17 | 0.06 ± 0.23 | 0.08 | 0.36 |
+| Over-confident rate (diagnostic) | 0.33 ± 0.48 | 0.14 ± 0.35 | 0.28 | 0.00 |
+| Citation precision | 0.81 ± 0.09 | 0.89 ± 0.09 | 0.80 | 0.86 |
+| Key evidence recall | 0.42 ± 0.35 | 0.47 ± 0.32 | 0.48 | 0.25 |
+| Tool calls | 7.6 ± 3.0 | 5.7 ± 1.1 | 9.6 | 4.3 |
+| Latency (s) | 24.8 ± 8.2 | 9.0 ± 3.0 | 27.5 | 7.0 |
+| Total tokens | 63,911 ± 28,645 | 29,682 ± 12,751 | 82,743 | 11,405 |
+| Baseline steps per Run | – | 2.5 | – | 1.0 |
+| Removed citations (all 36 Runs) | 1 | 0 | 268 | 0 |
+| Cost (all 36 Runs) | $2.52 | $1.02 | $3.19 | $0.51 |
 
-Correct Runs out of 3 per scenario (top-1, then top-3), with mean total tokens per Run:
+Correct Runs out of 3 per scenario, with v1 in parentheses for top-1, and mean total tokens per Run:
 
 | Scenario | Multi top-1 | Baseline top-1 | Multi top-3 | Baseline top-3 | Multi tokens | Baseline tokens |
 |---|---|---|---|---|---|---|
-| bad-config-deploy | 2/3 | 2/3 | 3/3 | 2/3 | 43,090 | 10,626 |
-| cache-stampede | 0/3 | 0/3 | 0/3 | 0/3 | 145,958 | 10,526 |
-| cascading-failure | 0/3 | 0/3 | 0/3 | 0/3 | 148,791 | 10,969 |
-| database-failover | 3/3 | 0/3 | 3/3 | 0/3 | 60,939 | 19,182 |
-| disk-full | 3/3 | 0/3 | 3/3 | 0/3 | 46,856 | 14,225 |
-| expired-tls-certificate | 3/3 | 0/3 | 3/3 | 0/3 | 47,376 | 10,778 |
-| feature-flag-rollout | 1/3 | 0/3 | 1/3 | 0/3 | 81,453 | 10,924 |
-| insufficient-evidence | 2/3 | 3/3 | 2/3 | 3/3 | 69,902 | 9,993 |
-| load-balancer-misconfiguration | 1/3 | 0/3 | 1/3 | 0/3 | 91,346 | 11,202 |
-| logs-timeout | 0/3 | 0/3 | 0/3 | 0/3 | 60,085 | 8,609 |
-| slow-memory-leak | 0/3 | 0/3 | 1/3 | 0/3 | 111,984 | 9,714 |
-| third-party-api-outage | 0/3 | 0/3 | 1/3 | 0/3 | 85,140 | 10,108 |
-| **All** | **15/36** | **5/36** | **18/36** | **5/36** | **82,743** | **11,405** |
+| bad-config-deploy | 2/3 (2/3) | 2/3 (2/3) | 3/3 | 2/3 | 27,846 | 17,086 |
+| cache-stampede | 0/3 (0/3) | 0/3 (0/3) | 0/3 | 0/3 | 63,252 | 29,356 |
+| cascading-failure | 1/3 (0/3) | 1/3 (0/3) | 2/3 | 2/3 | 82,317 | 32,503 |
+| database-failover | 3/3 (3/3) | 3/3 (0/3) | 3/3 | 3/3 | 46,293 | 27,854 |
+| disk-full | 3/3 (3/3) | 2/3 (0/3) | 3/3 | 2/3 | 47,827 | 29,358 |
+| expired-tls-certificate | 3/3 (3/3) | 3/3 (0/3) | 3/3 | 3/3 | 37,136 | 17,804 |
+| feature-flag-rollout | 3/3 (1/3) | 3/3 (0/3) | 3/3 | 3/3 | 46,255 | 32,589 |
+| insufficient-evidence | 1/3 (2/3) | 3/3 (3/3) | 1/3 | 3/3 | 58,881 | 18,629 |
+| load-balancer-misconfiguration | 1/3 (1/3) | 0/3 (0/3) | 1/3 | 0/3 | 63,609 | 45,663 |
+| logs-timeout | 0/3 (0/3) | 0/3 (0/3) | 0/3 | 0/3 | 108,715 | 40,814 |
+| slow-memory-leak | 0/3 (0/3) | 0/3 (0/3) | 1/3 | 1/3 | 77,466 | 34,462 |
+| third-party-api-outage | 0/3 (0/3) | 0/3 (0/3) | 1/3 | 0/3 | 107,333 | 30,063 |
+| **All** | **17/36 (15/36)** | **17/36 (5/36)** | **21/36** | **19/36** | **63,911** | **29,682** |
 
 ### Reading the results
 
-- **Where the multi-agent system wins.** database-failover, disk-full and expired-tls-certificate (3/3 against 0/3), plus one Run each of feature-flag-rollout and load-balancer-misconfiguration. On database-failover, disk-full, expired-tls-certificate and feature-flag-rollout the baseline's rank-1 hypothesis was right in every Run (over-cautious rate 1.0), but it declared the result inconclusive. The gap is mostly a decision gap, not a ranking gap: hit@3 is 0.73 against 0.64. The Critic loop gathers more evidence (9.6 tool calls, key evidence recall 0.48 against 0.25) and then commits.
-- **Where the baseline is competitive.** bad-config-deploy (2/3 each) and insufficient-evidence, where the baseline is better (3/3 against 2/3): one multi-agent Run took the unrelated deploy near onset as a `deploy_regression`. Both systems score 0/3 on cache-stampede, cascading-failure, logs-timeout, slow-memory-leak and third-party-api-outage. The baseline also cites more precisely (0.86 against 0.80) and is never over-confident.
-- **How each system fails.** The baseline gave its final answer on step 1 in all 36 Runs, using only the four opening requests, and declared 34 of them inconclusive. The multi-agent system made 10 confident wrong calls. Four named the right component with the wrong cause type (`resource_exhaustion` or `dependency_timeout` for a memory leak, `connection_pool_exhaustion` for a config error). Five blamed another service with `dependency_timeout` instead of the third-party provider or the cache. One took the insufficient-evidence trap. With `query_logs` always timing out (logs-timeout), neither system found the connection-pool cause.
-- **Cost.** The multi-agent system used 7.3× the tokens (82.7k against 11.4k per Run), 4.0× the latency (27.5 s against 7.0 s) and 2.2× the tool calls. That works out to about $0.21 per correct top-1 Run, against $0.10 for the baseline.
-- **Caveats.** One seed and 3 Runs per scenario give wide spreads (top-1 spread 0.50). The scenarios are synthetic and the misleading data is coincidental, not adversarial.
+- **Top-1 is now a tie, 17/36 each.** The baseline went from 5 to 17 correct Runs because it now investigates before answering. It took 2.5 steps per Run on average, and only 6 of 36 Runs answered at step 1; 4 of those were still inconclusive despite the rule. It also commits far more often: 19 declared-conclusive answers against 2 in v1, and the over-cautious rate fell from 0.36 to 0.06. It now matches the multi-agent system on database-failover, expired-tls-certificate and feature-flag-rollout (3/3 each).
+- **Where the multi-agent system still wins.** Only by small margins: disk-full (3/3 against 2/3), load-balancer-misconfiguration (1/3 against 0/3) and top-3 overall (21 against 19). No scenario favours it by more than one Run.
+- **Where the baseline wins.** insufficient-evidence (3/3 against 1/3), where the multi-agent system twice blamed the unrelated deploy near onset. The baseline also cites more precisely (0.89 against 0.81) and finds more key evidence (recall 0.47 against 0.42).
+- **Confident wrong calls.** The multi-agent system made 12, the baseline 5. The Critic accepted wrong hypotheses on cache-stampede (3/3: a dependency timeout elsewhere twice, a cache stampede on the wrong component once), slow-memory-leak (3/3: the right component with `dependency_timeout` or `resource_exhaustion`), third-party-api-outage (2/3: a dependent service blamed), insufficient-evidence (2/3), bad-config-deploy and cascading-failure (1 each). The baseline's 5 were slow-memory-leak 3, cache-stampede 1 and cascading-failure 1. Neither system ranks `memory_leak` first, and neither ranks the logs-timeout cause in its top 3.
+- **Citation IDs.** Removed citations in multi-agent Runs fell from 268 to 1 once every prompt said only `E…` IDs are evidence and the board prompts labelled finding and gap IDs.
+- **Cost.** The multi-agent system used 2.2× the tokens (63.9k against 29.7k per Run), 2.7× the latency (24.8 s against 9.0 s) and 1.3× the tool calls: about $0.15 per correct top-1 Run against $0.06. The baseline's own tokens rose 2.6× from v1 as it took more steps. The multi-agent system's fell 23%, with fewer duplicate-request rounds.
+- **Bottom line and caveats.** On this dataset and model, given the same openings, guidance and budgets, the multi-agent architecture does not beat a single ReAct agent on accuracy. It costs about twice as much and is more often confidently wrong. One seed and 3 Runs per scenario give a top-1 spread of 0.51, and the multi-agent prompts changed between v1 and v2 too, so its v1-to-v2 change mixes the prompt change with Run-to-Run noise.
 
 ## Incomplete Functionality
 

@@ -9,155 +9,140 @@
     "start_time": "2024-01-06T23:43:00Z",
     "severity": "sev2"
   },
-  "verdict": "inconclusive",
-  "termination_reason": "max_critic_rounds",
-  "budget_limit": {
-    "limit": "critic_rounds",
-    "configured": 3.0,
-    "used_at_loop_end": 3.0
-  },
+  "verdict": "conclusive",
+  "termination_reason": "critic_accepted",
+  "budget_limit": null,
   "hypotheses": [
     {
       "hypothesis_id": "H1",
       "rank": 1,
-      "revision": 3,
+      "revision": 2,
       "component": "cart-e26",
       "cause_type": "dependency_timeout",
-      "statement": "cart-e26 is responding too slowly or timing out, causing shipping-929 to exceed its upstream call timeout and return 504s.",
+      "statement": "cart-e26 is timing out or responding too slowly to shipping-929, causing shipping-929 to return 504s and log repeated upstream call timeouts.",
       "supporting_evidence_ids": [
         "E0001",
         "E0004",
-        "E0007",
-        "E0009",
-        "E0010"
+        "E0006",
+        "E0007"
       ],
-      "contradicting_evidence_ids": [
-        "E0008"
-      ],
-      "confidence": 0.86,
-      "raw_confidence": 0.91,
+      "contradicting_evidence_ids": [],
+      "confidence": 0.9,
+      "raw_confidence": 0.9,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Direct cart-e26 logs or traces showing request queueing, timeout errors, or slow backend calls at the incident time.",
-          "suggested_tool": "query_logs"
-        },
-        {
-          "description": "Request-level tracing or dependency timing that ties shipping-929 timeouts to specific slow cart-e26 operations.",
-          "suggested_tool": "get_dependencies"
-        }
-      ],
-      "contributing_factors": [
-        "Immediate upstream dependency is cart-e26",
-        "shipping-929 logs show repeated cart call timeouts",
-        "cart-e26 latency is already high",
-        "cart-e26 emits worker-pool exhaustion errors",
-        "cart-e26 CPU is near saturation"
-      ]
-    },
-    {
-      "hypothesis_id": "H2",
-      "rank": 2,
-      "revision": 3,
-      "component": "cart-e26",
-      "cause_type": "resource_exhaustion",
-      "statement": "cart-e26 is under resource pressure or capacity strain, which is manifesting as elevated latency and causing downstream shipping-929 timeouts.",
-      "supporting_evidence_ids": [
-        "E0007",
-        "E0009",
-        "E0010",
-        "E0001"
-      ],
-      "contradicting_evidence_ids": [
-        "E0008"
-      ],
-      "confidence": 0.7699999999999999,
-      "raw_confidence": 0.82,
-      "evidence_sufficient": false,
-      "missing_evidence": [
-        {
-          "description": "Cart-side memory, thread pool, or connection pool metrics during the incident window to confirm the specific exhausted resource.",
+          "description": "Direct dependency metrics or logs from cart-e26 showing the timeout behavior at the incident start and confirming it is the bottleneck rather than a downstream symptom.",
           "suggested_tool": "query_metrics"
         },
         {
-          "description": "Cart logs showing whether saturation was caused by load, retries, or an internal bottleneck.",
+          "description": "Evidence that cart-e26 latency/error onset aligns tightly with shipping-929 timeout onset across the same time window.",
           "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "High cart-e26 p99 latency",
-        "Worker pool exhaustion errors",
-        "Near-saturated CPU",
-        "Shipping timeouts align with cart slowness"
+        "shipping-929 repeatedly times out on cart-e26 calls",
+        "cart-e26 p99 latency rose above 2 s near the incident start",
+        "cart-e26 logs show worker pool saturation"
       ]
     },
     {
       "hypothesis_id": "H3",
-      "rank": 3,
-      "revision": 3,
-      "component": "shipping-929",
-      "cause_type": "connection_pool_exhaustion",
-      "statement": "shipping-929 itself may be exhausting outbound connection or worker pools while waiting on cart-e26, amplifying timeout errors and 504s without a local deployment change.",
+      "rank": 2,
+      "revision": 2,
+      "component": "cart-e26",
+      "cause_type": "resource_exhaustion",
+      "statement": "cart-e26 is experiencing worker-pool or similar resource exhaustion, which slows responses enough to trigger shipping-929 timeouts and elevated 504s.",
       "supporting_evidence_ids": [
-        "E0001",
-        "E0002"
-      ],
-      "contradicting_evidence_ids": [
-        "E0003",
         "E0006",
-        "E0005"
+        "E0007",
+        "E0001"
       ],
-      "confidence": 0.29000000000000004,
-      "raw_confidence": 0.34,
+      "contradicting_evidence_ids": [],
+      "confidence": 0.78,
+      "raw_confidence": 0.78,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Shipping-929 connection pool, worker pool, and queue-depth metrics around the incident start.",
+          "description": "Metrics showing the specific exhausted resource on cart-e26, such as thread pool, CPU, memory, queue depth, or connection saturation.",
           "suggested_tool": "query_metrics"
         },
         {
-          "description": "Shipping-929 logs or traces showing blocked threads, retries, or pool exhaustion.",
+          "description": "Evidence that the saturation began at or before the shipping-929 timeout onset and is not secondary to another upstream issue.",
           "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "No local deployment/config change on shipping-929",
-        "Shipping logs show upstream timeouts",
-        "Error rate is elevated on shipping-929"
+        "worker pool exhausted: 256/256 threads busy",
+        "cart-e26 latency p99 exceeded 2 s",
+        "shipping-929 logs show repeated cart-e26 timeouts"
+      ]
+    },
+    {
+      "hypothesis_id": "H2",
+      "rank": 3,
+      "revision": 2,
+      "component": "shipping-929",
+      "cause_type": "code_defect",
+      "statement": "shipping-929 has an internal request-handling defect that makes it time out on cart-e26 calls under normal conditions, independent of a recent deployment on shipping-929.",
+      "supporting_evidence_ids": [
+        "E0003",
+        "E0001"
+      ],
+      "contradicting_evidence_ids": [
+        "E0006",
+        "E0007"
+      ],
+      "confidence": 0.28,
+      "raw_confidence": 0.28,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Runtime or code-level evidence from shipping-929 showing a defect in timeout handling, retry logic, or request orchestration.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "Evidence that cart-e26 was healthy while shipping-929 still timed out, or that the issue reproduces without cart-e26 degradation.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "no recent deployment/config/flag change on shipping-929",
+        "shipping-929 logs mention cart-e26 timeouts"
       ]
     },
     {
       "hypothesis_id": "H4",
       "rank": 4,
-      "revision": 3,
-      "component": "shipping-929",
-      "cause_type": "code_defect",
-      "statement": "A latent bug in shipping-929's request handling or timeout logic is causing excessive 504s when cart calls are slow, independent of a recent deployment.",
+      "revision": 2,
+      "component": "public-lb-571",
+      "cause_type": "load_balancer_misconfiguration",
+      "statement": "A load balancer routing issue is intermittently affecting shipping-929 traffic, and the cart-e26 timeout messages are downstream symptoms rather than the root cause.",
       "supporting_evidence_ids": [
-        "E0001",
+        "E0004",
         "E0002"
       ],
       "contradicting_evidence_ids": [
-        "E0003",
-        "E0006"
+        "E0001",
+        "E0006",
+        "E0007"
       ],
-      "confidence": 0.13,
-      "raw_confidence": 0.18,
+      "confidence": 0.08,
+      "raw_confidence": 0.08,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Application traces or stack traces from shipping-929 showing an internal exception path, retry bug, or timeout-handling defect.",
+          "description": "Load balancer logs or configuration evidence showing misrouting, unhealthy backend selection, or connection issues around the incident start.",
           "suggested_tool": "query_logs"
         },
         {
-          "description": "Code or release evidence linking the behavior to a known defect.",
-          "suggested_tool": "search_incidents"
+          "description": "Evidence that requests fail before reaching cart-e26, or that cart-e26 remains healthy while shipping-929 errors persist.",
+          "suggested_tool": "query_metrics"
         }
       ],
       "contributing_factors": [
-        "No recent shipping-929 deployment found",
-        "Timeouts are visible in shipping logs",
-        "Error rate is elevated"
+        "public-lb-571 is in the dependency graph",
+        "shipping-929 error rate is elevated"
       ]
     }
   ],
@@ -165,509 +150,220 @@
   "facts": [
     {
       "claim_id": "F001",
-      "producer": "observability",
-      "text": "shipping-929 error_rate jumped from ~0.3-0.5% to ~40% starting at 23:33Z and stayed elevated through the queried range.",
+      "producer": "dependency",
+      "text": "shipping-929 has upstream dependencies on cart-e26, checkout-bbb, auth-620, catalog-db-7ab, session-cache-bcd, card-gateway-6d9, events-queue-2c6, and mail-queue-672; public-lb-571 is downstream of shipping-929. This places cart-e26 and checkout-bbb one to two hops upstream in the dependency path, while public-lb-571 sits downstream.",
       "evidence_ids": [
-        "E0002"
+        "E0004"
       ]
     },
     {
       "claim_id": "F002",
-      "producer": "observability",
-      "text": "shipping-929 latency_p99_ms was already elevated across the queried window (roughly 162-197 ms in the sampled buckets) with no distinct step-change onset visible in the available data.",
+      "producer": "dependency",
+      "text": "No deployment, config change, or feature-flag change was found for shipping-929 in the week before the incident start time, so there is no current evidence of a direct recent change on the affected service itself.",
       "evidence_ids": [
-        "E0005"
+        "E0003"
       ]
     },
     {
       "claim_id": "F003",
-      "producer": "observability",
-      "text": "shipping-929 began emitting repeated error logs for timeouts calling cart-e26 at 23:40:07Z, continuing repeatedly afterward.",
+      "producer": "dependency",
+      "text": "shipping-929 logs show repeated timeouts calling cart-e26 beginning before the incident start time, indicating cart-e26 is the immediate upstream dependency on the observed failure path.",
       "evidence_ids": [
         "E0001"
       ]
     },
     {
       "claim_id": "F004",
-      "producer": "dependency",
-      "text": "shipping-929 depends upstream on checkout-bbb (1 hop), which in turn is upstream of mail-queue-672 (2 hops); this places checkout-related request handling on the dependency path for shipping-929 timeouts.",
+      "producer": "observability",
+      "text": "shipping-929 error_rate jumped sharply from a low baseline to about 40% starting at 2024-01-06T23:43:00Z.",
       "evidence_ids": [
-        "E0004"
+        "E0002"
       ]
     },
     {
       "claim_id": "F005",
-      "producer": "dependency",
-      "text": "shipping-929 depends upstream on cart-e26 (1 hop); logs show shipping-929 errors are cart call timeouts, making cart-e26 the most directly implicated upstream dependency in the observed failure path.",
+      "producer": "observability",
+      "text": "shipping-929 logs began showing repeated error messages matching 'call to cart-e26 timed out after 2000 ms' by 2024-01-06T23:40:07Z.",
       "evidence_ids": [
-        "E0004",
         "E0001"
       ]
     },
     {
       "claim_id": "F006",
-      "producer": "dependency",
-      "text": "shipping-929 depends upstream on auth-620 (1 hop), so authentication latency or failures could contribute to request timeouts on the shipping path.",
+      "producer": "observability",
+      "text": "shipping-929 latency_p99_ms did not show a clear onset over the queried range; it stayed in the roughly 162-197 ms band throughout.",
       "evidence_ids": [
-        "E0004"
+        "E0005"
       ]
     },
     {
       "claim_id": "F007",
-      "producer": "dependency",
-      "text": "shipping-929 depends upstream on catalog-db-7ab (1 hop), so database slowness is another upstream failure domain on the request path.",
+      "producer": "observability",
+      "text": "cart-e26 latency p99_ms rose sharply from sub-200 ms to above 2 s, with onset at 2024-01-06T23:33:00Z, aligning closely with shipping-929's timeout onset.",
       "evidence_ids": [
-        "E0004"
+        "E0006"
       ]
     },
     {
       "claim_id": "F008",
-      "producer": "dependency",
-      "text": "shipping-929 depends upstream on session-cache-bcd (1 hop), so cache latency or misses could affect shipping request performance.",
+      "producer": "observability",
+      "text": "shipping-929 error_rate increased from near-zero to above 40% during the queried range, consistent with the reported 504 symptom.",
       "evidence_ids": [
-        "E0004"
+        "E0002"
       ]
     },
     {
       "claim_id": "F009",
-      "producer": "dependency",
-      "text": "shipping-929 depends upstream on card-gateway-6d9 (2 hops), so third-party payment dependency issues are on the broader upstream path, though less directly tied to the cart timeout logs.",
+      "producer": "observability",
+      "text": "shipping-929 logs contain repeated upstream timeout errors mentioning cart-e# calls timing out, with onset no later than 2024-01-06T23:40:07.364803Z.",
       "evidence_ids": [
-        "E0004"
+        "E0001"
       ]
     },
     {
       "claim_id": "F010",
-      "producer": "dependency",
-      "text": "shipping-929 also has upstream queue dependencies on events-queue-2c6 and mail-queue-672, which are part of the broader dependency graph and could affect asynchronous side effects even if they are not the primary cause of synchronous 504s.",
+      "producer": "observability",
+      "text": "shipping-929 shows repeated upstream timeout errors calling cart-e26, starting at 2024-01-06T23:40:07Z.",
       "evidence_ids": [
-        "E0004"
+        "E0001"
       ]
     },
     {
       "claim_id": "F011",
-      "producer": "dependency",
-      "text": "shipping-929 has a downstream dependency on public-lb-571, indicating the load balancer sits in front of the service rather than being an upstream cause of the timeout behavior.",
+      "producer": "observability",
+      "text": "shipping-929 p99 latency is elevated over the queried range, with the highest observed value at 2024-01-06T23:43:00Z.",
       "evidence_ids": [
-        "E0004"
+        "E0005"
       ]
     },
     {
       "claim_id": "F012",
-      "producer": "dependency",
-      "text": "No deployments, config changes, or feature-flag changes were found for shipping-929 in the week before the incident start time, so there is no current evidence of a direct change on the service itself.",
+      "producer": "observability",
+      "text": "cart-e26 shows worker-pool saturation errors, starting at 2024-01-06T23:38:33Z.",
       "evidence_ids": [
-        "E0003"
+        "E0007"
       ]
     },
     {
       "claim_id": "F013",
       "producer": "observability",
-      "text": "shipping-929 error_rate was already elevated by 2024-01-06T22:43:00Z and remained high through the queried range, with a last observed value of 0.401971 and a max of 0.4118.",
+      "text": "cart-e26 p99 latency is elevated over the queried range, with the highest observed value at 2024-01-07T00:33:00Z.",
       "evidence_ids": [
-        "E0002"
+        "E0006"
       ]
     },
     {
       "claim_id": "F014",
-      "producer": "observability",
-      "text": "shipping-929 error logs show timeouts calling cart beginning at 2024-01-06T23:40:07.364803Z and continuing through the observed window.",
+      "producer": "reporting",
+      "text": "shipping-929 error rate jumped from near-zero to about 40% starting at 2024-01-06T23:43:00Z.",
       "evidence_ids": [
-        "E0001"
+        "E0002"
       ]
     },
     {
       "claim_id": "F015",
-      "producer": "observability",
-      "text": "shipping-929 p99 latency did not show a corresponding spike in the queried range; values stayed around 162-197 ms, so the incident symptom of p99 latency above 2 s is not supported by the available metric evidence.",
+      "producer": "reporting",
+      "text": "shipping-929 logs show repeated timeouts calling cart-e26 beginning by 2024-01-06T23:40:07Z.",
       "evidence_ids": [
-        "E0005"
+        "E0001"
       ]
     },
     {
       "claim_id": "F016",
-      "producer": "observability",
-      "text": "cart-e26 p99 latency was already high at the start of the queried window (about 1.4-2.3 s) and remained elevated, which could explain shipping-929 timeouts via an upstream dependency.",
+      "producer": "reporting",
+      "text": "cart-e26 p99 latency rose sharply above 2 seconds, aligning with the shipping-929 timeout onset.",
       "evidence_ids": [
-        "E0007"
+        "E0006"
       ]
     },
     {
       "claim_id": "F017",
-      "producer": "dependency",
-      "text": "shipping-929 depends on cart-e26 as an immediate upstream service in its dependency path; this places cart-e26 directly upstream of the affected service.",
+      "producer": "reporting",
+      "text": "cart-e26 also emitted worker-pool exhaustion errors during the incident window.",
       "evidence_ids": [
-        "E0004"
+        "E0007"
       ]
     },
     {
       "claim_id": "F018",
-      "producer": "dependency",
-      "text": "shipping-929 was experiencing upstream call timeouts to cart-e# during the incident window, indicating the failure mode was in the cart dependency path rather than a local deployment/config change on shipping-929.",
+      "producer": "reporting",
+      "text": "No deployment, config change, or feature-flag change was found for shipping-929 in the week before the incident.",
       "evidence_ids": [
-        "E0001"
-      ]
-    },
-    {
-      "claim_id": "F019",
-      "producer": "dependency",
-      "text": "shipping-929 showed elevated error rate during the incident window, consistent with the reported 504s and timeout symptoms.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F020",
-      "producer": "dependency",
-      "text": "shipping-929 showed elevated p99 latency during the incident window, consistent with the reported timeout symptoms.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F021",
-      "producer": "dependency",
-      "text": "No deployment, config change, or feature-flag change was found for shipping-929 in the incident window, so there is no current evidence of a local change on the affected service.",
-      "evidence_ids": [
-        "E0006",
         "E0003"
-      ]
-    },
-    {
-      "claim_id": "F022",
-      "producer": "dependency",
-      "text": "No deployment, config change, or feature-flag change was found for cart-e26 in the incident window, so there is no current evidence of a recent change on the immediate upstream dependency.",
-      "evidence_ids": [
-        "E0008"
-      ]
-    },
-    {
-      "claim_id": "F023",
-      "producer": "observability",
-      "text": "shipping-929 error_rate rose from a low baseline to elevated levels during the incident window, with the first observed increase at 2024-01-06T23:43:00Z and continuing upward afterward.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F024",
-      "producer": "observability",
-      "text": "shipping-929 p99 latency was already elevated by 2024-01-06T23:38:00Z and remained high through the queried range, consistent with the reported timeout symptoms.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F025",
-      "producer": "observability",
-      "text": "shipping-929 began logging upstream timeout errors to cart around 2024-01-06T23:40:07Z, indicating the shipping service was failing while waiting on cart.",
-      "evidence_ids": [
-        "E0001"
-      ]
-    },
-    {
-      "claim_id": "F026",
-      "producer": "observability",
-      "text": "cart-e26 p99 latency was already above 1.4 s by 2024-01-06T23:38:00Z and peaked above 2.2 s at 2024-01-06T23:48:00Z, matching the upstream timeout hypothesis.",
-      "evidence_ids": [
-        "E0007"
-      ]
-    },
-    {
-      "claim_id": "F027",
-      "producer": "observability",
-      "text": "cart-e26 CPU utilization jumped from a lower baseline to sustained near-saturation starting at 2024-01-06T23:38:00Z, which is consistent with resource pressure on the upstream dependency.",
-      "evidence_ids": [
-        "E0010"
-      ]
-    },
-    {
-      "claim_id": "F028",
-      "producer": "observability",
-      "text": "cart-e26 started emitting worker-pool exhaustion errors at 2024-01-06T23:38:33Z, supporting saturation as the proximate cause of its slow responses.",
-      "evidence_ids": [
-        "E0009"
-      ]
-    },
-    {
-      "claim_id": "F029",
-      "producer": "observability",
-      "text": "shipping-929 request volume is not directly evidenced as changing in the available data; only error_rate is observed, so no onset can be established for request_rate from current evidence.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F030",
-      "producer": "observability",
-      "text": "shipping-929 shows an error spike from upstream cart call timeouts; the first observed timeout log is at 2024-01-06T23:40:07.364803Z and the pattern continues through 23:57Z.",
-      "evidence_ids": [
-        "E0001"
-      ]
-    },
-    {
-      "claim_id": "F031",
-      "producer": "observability",
-      "text": "shipping-929 latency p99 is elevated during the incident window, with the first observed sample at 2024-01-06T23:38:00Z and a peak at 23:38Z.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F032",
-      "producer": "observability",
-      "text": "shipping-929 error rate is elevated across the queried range, reaching 0.401971 by 2024-01-07T00:03:00Z.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F033",
-      "producer": "observability",
-      "text": "cart-e26 shows worker-pool exhaustion errors beginning at 2024-01-06T23:38:33.940460Z, consistent with request rejection under load.",
-      "evidence_ids": [
-        "E0009"
-      ]
-    },
-    {
-      "claim_id": "F034",
-      "producer": "observability",
-      "text": "cart-e26 latency p99 is already high at the start of the observed window and remains above 2 s through the available samples.",
-      "evidence_ids": [
-        "E0007"
-      ]
-    },
-    {
-      "claim_id": "F035",
-      "producer": "observability",
-      "text": "cart-e26 CPU utilization is elevated and peaks at 2024-01-06T23:43:00Z, aligning with the onset of worker-pool exhaustion.",
-      "evidence_ids": [
-        "E0010"
-      ]
-    },
-    {
-      "claim_id": "F036",
-      "producer": "observability",
-      "text": "cart-e26 shows CPU saturation beginning at the incident onset, consistent with a bottleneck behind the upstream timeouts.",
-      "evidence_ids": [
-        "E0010"
-      ]
-    },
-    {
-      "claim_id": "F037",
-      "producer": "observability",
-      "text": "cart-e26 logs show worker pool exhaustion starting shortly after the incident began, indicating request rejection under load.",
-      "evidence_ids": [
-        "E0009"
-      ]
-    },
-    {
-      "claim_id": "F038",
-      "producer": "observability",
-      "text": "shipping-929 error rate rose sharply during the incident window, matching the reported 504 symptom.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F039",
-      "producer": "observability",
-      "text": "shipping-929 latency p99 was elevated during the incident window, matching the reported timeout symptom.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F040",
-      "producer": "observability",
-      "text": "cart-e26 memory utilization did not materially change over the queried range, so memory pressure is not supported as the bottleneck by current evidence.",
-      "evidence_ids": [
-        "E0017"
-      ]
-    },
-    {
-      "claim_id": "F041",
-      "producer": "observability",
-      "text": "shipping-929 began emitting error logs for timed-out calls to cart around 2024-01-06T23:40:07Z, consistent with the reported timeout symptoms.",
-      "evidence_ids": [
-        "E0001"
-      ]
-    },
-    {
-      "claim_id": "F042",
-      "producer": "observability",
-      "text": "shipping-929 error_rate was already elevated in the queried range and rose to 0.401971 by 2024-01-07T00:03:00Z, indicating sustained error pressure during the incident window.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F043",
-      "producer": "observability",
-      "text": "shipping-929 p99 latency stayed in a relatively narrow band (about 162-197 ms) over the queried range, so I do not see evidence of a p99 latency spike above 2 s in the available metrics.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F044",
-      "producer": "observability",
-      "text": "cart-e26 started logging worker-pool exhaustion and request rejections at 2024-01-06T23:38:33Z, which aligns with the upstream timeout symptoms seen in shipping.",
-      "evidence_ids": [
-        "E0009"
-      ]
-    },
-    {
-      "claim_id": "F045",
-      "producer": "observability",
-      "text": "cart-e26 p99 latency was already high at the first observed point (1973 ms at 2024-01-06T23:38:00Z) and remained above 2 s by 2024-01-06T23:48:00Z, supporting a slow upstream dependency.",
-      "evidence_ids": [
-        "E0007"
-      ]
-    },
-    {
-      "claim_id": "F046",
-      "producer": "observability",
-      "text": "cart-e26 CPU utilization was elevated from the start of the queried window and peaked at 0.9889 at 2024-01-06T23:43:00Z, consistent with saturation during the incident.",
-      "evidence_ids": [
-        "E0010"
-      ]
-    },
-    {
-      "claim_id": "F047",
-      "producer": "observability",
-      "text": "cart-e26 memory utilization stayed roughly flat around 0.44-0.46 over the queried range, so memory does not appear to be the changing signal here.",
-      "evidence_ids": [
-        "E0017"
-      ]
-    },
-    {
-      "claim_id": "F048",
-      "producer": "reporting",
-      "text": "shipping-929 error_rate jumped from roughly 0.3-0.5% to about 40% and stayed elevated during the queried range.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F049",
-      "producer": "reporting",
-      "text": "shipping-929 logs repeatedly show timeouts calling cart-e26 starting at 2024-01-06T23:40:07Z.",
-      "evidence_ids": [
-        "E0001"
-      ]
-    },
-    {
-      "claim_id": "F050",
-      "producer": "reporting",
-      "text": "cart-e26 p99 latency was already high, reaching above 2 s in the sampled window.",
-      "evidence_ids": [
-        "E0007"
-      ]
-    },
-    {
-      "claim_id": "F051",
-      "producer": "reporting",
-      "text": "cart-e26 emitted worker-pool exhaustion errors and showed near-saturated CPU during the incident window.",
-      "evidence_ids": [
-        "E0009",
-        "E0010"
-      ]
-    },
-    {
-      "claim_id": "F052",
-      "producer": "reporting",
-      "text": "No deployments, config changes, or feature-flag changes were found for shipping-929 or cart-e26 in the incident window.",
-      "evidence_ids": [
-        "E0003",
-        "E0006",
-        "E0008"
-      ]
-    },
-    {
-      "claim_id": "F053",
-      "producer": "reporting",
-      "text": "shipping-929 depends directly on cart-e26, making cart the most directly implicated upstream dependency in the observed failure path.",
-      "evidence_ids": [
-        "E0004",
-        "E0001"
       ]
     }
   ],
   "assumptions": [],
-  "data_gaps": [
-    {
-      "source": "observability",
-      "query": {
-        "limit": 25,
-        "tool": "query_metrics",
-        "service": "cart-e26",
-        "metric_name": "db_connections",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "step_seconds": 300
-      },
-      "task_id": null,
-      "step": null,
-      "reason": "unfulfilled_evidence_request:ER3.2:max_critic_rounds",
-      "affected_time_range": {
-        "start": "2024-01-06T23:33:00Z",
-        "end": "2024-01-07T00:03:00Z"
-      },
-      "after_verdict": false,
-      "gap_id": "G001",
-      "recorded_at": "2026-10-20T21:42:54.313571Z"
-    }
-  ],
+  "data_gaps": [],
   "recommended_actions": [
     {
       "action_id": "A1",
-      "text": "Collect cart-e26 evidence for the incident window to confirm whether the upstream slowdown is due to a specific dependency bottleneck rather than generic CPU saturation: query cart-e26 db connections, cache hit ratio, and replication lag metrics, and correlate them with cart logs/traces for queueing, timeout errors, or slow backend calls.",
-      "category": "further_investigation",
+      "text": "Reduce immediate pressure on cart-e26 by temporarily lowering shipping-929 request concurrency or rate, and route traffic away from the slow path if possible until cart-e26 recovers.",
+      "category": "mitigation",
       "hypothesis_id": "H1",
       "evidence_ids": [
-        "E0007",
-        "E0009",
-        "E0010"
+        "E0001",
+        "E0002",
+        "E0006",
+        "E0007"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A2",
-      "text": "Investigate the exact resource constraint on cart-e26 by gathering thread-pool, connection-pool, and queue-depth metrics plus cart-side logs/traces to determine whether load, retries, or an internal bottleneck caused the worker-pool exhaustion and elevated latency.",
-      "category": "further_investigation",
-      "hypothesis_id": "H2",
+      "text": "Investigate and remediate the cart-e26 timeout bottleneck causing shipping-929 upstream call failures; prioritize restoring cart-e26 response times to sub-timeout levels and validating end-to-end request success.",
+      "category": "fix",
+      "hypothesis_id": "H1",
       "evidence_ids": [
-        "E0007",
-        "E0009",
-        "E0010",
-        "E0017"
+        "E0001",
+        "E0004",
+        "E0006",
+        "E0007"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A3",
-      "text": "Check shipping-929 for self-induced amplification by collecting outbound connection-pool, worker-pool, and queue-depth metrics around the incident start, along with logs/traces for blocked threads, retries, or pool exhaustion.",
-      "category": "further_investigation",
+      "text": "Identify the exhausted cart-e26 resource behind the worker-pool saturation and correct the capacity limit or leak/queueing issue so requests are no longer rejected under load.",
+      "category": "fix",
       "hypothesis_id": "H3",
       "evidence_ids": [
-        "E0001",
-        "E0002"
+        "E0006",
+        "E0007"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A4",
-      "text": "Rule out a latent shipping-929 defect by reviewing application traces or stack traces for internal exception paths, retry bugs, or timeout-handling issues, and compare against release/code history for any known defect matching the observed timeout pattern.",
+      "text": "Add alerting and autoscaling or backpressure controls for cart-e26 resource saturation signals such as worker-pool occupancy, queue depth, and p99 latency so similar exhaustion is detected before shipping timeouts occur.",
+      "category": "prevention",
+      "hypothesis_id": "H3",
+      "evidence_ids": [
+        "E0006",
+        "E0007"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A5",
+      "text": "Verify whether shipping-929 has any timeout-handling or retry defect by reviewing runtime logs and reproducing the issue with cart-e26 healthy; this would close the remaining uncertainty around an internal shipping-side cause.",
+      "category": "further_investigation",
+      "hypothesis_id": "H2",
+      "evidence_ids": [
+        "E0003",
+        "E0001",
+        "E0006"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A6",
+      "text": "Check load balancer logs and backend selection behavior around the incident window to rule out misrouting or unhealthy backend selection as a contributing factor.",
       "category": "further_investigation",
       "hypothesis_id": "H4",
       "evidence_ids": [
-        "E0001",
-        "E0002",
-        "E0003",
-        "E0006"
+        "E0004",
+        "E0002"
       ],
       "producer": "reporting_agent"
     }
@@ -702,7 +398,8 @@
       "status": "verified",
       "corroborating_ids": [
         "E0001",
-        "E0002"
+        "E0002",
+        "E0004"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -711,93 +408,34 @@
       "claim_id": "IC4",
       "kind": "start_time",
       "text": "The incident started at 2024-01-06T23:43:00+00:00.",
-      "status": "contradicted",
-      "corroborating_ids": [],
-      "contradicting_ids": [
-        "E0002"
+      "status": "verified",
+      "corroborating_ids": [
+        "E0001",
+        "E0002",
+        "E0005"
       ],
+      "contradicting_ids": [],
       "label": "fact"
     }
   ],
-  "missing_evidence": [
-    {
-      "source": "evidence_request",
-      "hypothesis_id": "H1",
-      "description": "Can you query cart-e26 metrics during the incident window for db connections, cache hit ratio, or replication lag to determine whether a downstream dependency bottleneck rather than generic CPU saturation is driving the latency? (suggested: query_metrics)",
-      "ref": "ER3.2"
-    },
-    {
-      "source": "data_gap",
-      "hypothesis_id": null,
-      "description": "observability: unfulfilled_evidence_request:ER3.2:max_critic_rounds",
-      "ref": "G001"
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H1",
-      "description": "Direct cart-e26 logs or traces showing request queueing, timeout errors, or slow backend calls at the incident time.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H1",
-      "description": "Request-level tracing or dependency timing that ties shipping-929 timeouts to specific slow cart-e26 operations.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H2",
-      "description": "Cart-side memory, thread pool, or connection pool metrics during the incident window to confirm the specific exhausted resource.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H2",
-      "description": "Cart logs showing whether saturation was caused by load, retries, or an internal bottleneck.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H3",
-      "description": "Shipping-929 connection pool, worker pool, and queue-depth metrics around the incident start.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H3",
-      "description": "Shipping-929 logs or traces showing blocked threads, retries, or pool exhaustion.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H4",
-      "description": "Application traces or stack traces from shipping-929 showing an internal exception path, retry bug, or timeout-handling defect.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H4",
-      "description": "Code or release evidence linking the behavior to a known defect.",
-      "ref": null
-    }
-  ],
+  "missing_evidence": [],
   "budget_usage": {
     "tool_calls": {
-      "used": 21.0,
+      "used": 7.0,
       "limit": 60.0
     },
     "tokens": {
-      "used": 177284.0,
+      "used": 65266.0,
       "limit": 400000.0
     },
-    "input_tokens": 162934,
-    "output_tokens": 14350,
+    "input_tokens": 59952,
+    "output_tokens": 5314,
     "critic_rounds": {
-      "used": 3.0,
+      "used": 2.0,
       "limit": 3.0
     },
     "wall_clock_s": {
-      "used": 53.884,
+      "used": 31.178,
       "limit": 900.0
     }
   },
@@ -991,22 +629,22 @@
         "service": "shipping-929",
         "metric_name": "latency_p99_ms",
         "time_range": {
-          "start": "2024-01-06T23:38:00Z",
+          "start": "2024-01-06T22:43:00Z",
           "end": "2024-01-07T01:43:00Z"
         },
         "step_seconds": 600
       },
       "observation": {
-        "record_count": 10,
+        "record_count": 15,
         "time_span": {
-          "start": "2024-01-06T23:38:00Z",
-          "end": "2024-01-07T01:08:00Z"
+          "start": "2024-01-06T22:43:00Z",
+          "end": "2024-01-07T01:03:00Z"
         },
         "top_values": [
           {
             "value": "latency_p99_ms shipping-929",
-            "count": 10,
-            "first_seen": "2024-01-06T23:38:00Z"
+            "count": 15,
+            "first_seen": "2024-01-06T22:43:00Z"
           }
         ],
         "key_attributes": {
@@ -1018,49 +656,21 @@
           ]
         },
         "metric_stats": {
-          "min": 162.3531,
+          "min": 162.0628,
           "max": 197.0408,
-          "mean": 178.10735,
-          "first": 178.27162,
-          "last": 186.12715,
-          "max_at": "2024-01-06T23:38:00Z",
-          "min_at": "2024-01-07T00:18:00Z"
+          "mean": 178.851215,
+          "first": 176.62201,
+          "last": 180.055086,
+          "max_at": "2024-01-06T23:43:00Z",
+          "min_at": "2024-01-06T23:33:00Z"
         },
         "note": null,
         "truncated": false
       },
-      "reliability": "complete"
+      "reliability": "stale"
     },
     {
       "evidence_id": "E0006",
-      "tool": "get_deployments",
-      "query": {
-        "limit": 25,
-        "tool": "get_deployments",
-        "time_range": {
-          "start": "2024-01-06T23:38:00Z",
-          "end": "2024-01-06T23:53:00Z"
-        },
-        "service": "shipping-929",
-        "change_types": [
-          "config_change",
-          "deployment",
-          "feature_flag_change"
-        ]
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0007",
       "tool": "query_metrics",
       "query": {
         "limit": 25,
@@ -1068,22 +678,22 @@
         "service": "cart-e26",
         "metric_name": "latency_p99_ms",
         "time_range": {
-          "start": "2024-01-06T23:38:00Z",
-          "end": "2024-01-06T23:53:00Z"
+          "start": "2024-01-06T22:43:00Z",
+          "end": "2024-01-07T01:43:00Z"
         },
-        "step_seconds": 300
+        "step_seconds": 600
       },
       "observation": {
-        "record_count": 3,
+        "record_count": 15,
         "time_span": {
-          "start": "2024-01-06T23:38:00Z",
-          "end": "2024-01-06T23:48:00Z"
+          "start": "2024-01-06T22:43:00Z",
+          "end": "2024-01-07T01:03:00Z"
         },
         "top_values": [
           {
             "value": "latency_p99_ms cart-e26",
-            "count": 3,
-            "first_seen": "2024-01-06T23:38:00Z"
+            "count": 15,
+            "first_seen": "2024-01-06T22:43:00Z"
           }
         ],
         "key_attributes": {
@@ -1095,13 +705,13 @@
           ]
         },
         "metric_stats": {
-          "min": 1411.6413,
-          "max": 2299.6281,
-          "mean": 2095.13328,
-          "first": 1973.24952,
-          "last": 2160.67064,
-          "max_at": "2024-01-06T23:48:00Z",
-          "min_at": "2024-01-06T23:38:00Z"
+          "min": 162.2011,
+          "max": 2413.9295,
+          "mean": 1414.39223,
+          "first": 178.90644,
+          "last": 2227.227671,
+          "max_at": "2024-01-07T00:33:00Z",
+          "min_at": "2024-01-06T22:43:00Z"
         },
         "note": null,
         "truncated": false
@@ -1109,43 +719,15 @@
       "reliability": "complete"
     },
     {
-      "evidence_id": "E0008",
-      "tool": "get_deployments",
-      "query": {
-        "limit": 25,
-        "tool": "get_deployments",
-        "time_range": {
-          "start": "2024-01-06T23:38:00Z",
-          "end": "2024-01-06T23:53:00Z"
-        },
-        "service": "cart-e26",
-        "change_types": [
-          "config_change",
-          "deployment",
-          "feature_flag_change"
-        ]
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0009",
+      "evidence_id": "E0007",
       "tool": "query_logs",
       "query": {
         "limit": 25,
         "tool": "query_logs",
         "service": "cart-e26",
         "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
+          "start": "2024-01-06T22:43:00Z",
+          "end": "2024-01-07T01:43:00Z"
         },
         "levels": [
           "error",
@@ -1177,365 +759,6 @@
         },
         "metric_stats": null,
         "note": null,
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0010",
-      "tool": "query_metrics",
-      "query": {
-        "limit": 25,
-        "tool": "query_metrics",
-        "service": "cart-e26",
-        "metric_name": "cpu_utilization",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "step_seconds": 300
-      },
-      "observation": {
-        "record_count": 6,
-        "time_span": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-06T23:58:00Z"
-        },
-        "top_values": [
-          {
-            "value": "cpu_utilization cart-e26",
-            "count": 6,
-            "first_seen": "2024-01-06T23:33:00Z"
-          }
-        ],
-        "key_attributes": {
-          "metric_name": [
-            "cpu_utilization"
-          ],
-          "service": [
-            "cart-e26"
-          ]
-        },
-        "metric_stats": {
-          "min": 0.3258,
-          "max": 0.9889,
-          "mean": 0.873733,
-          "first": 0.3865,
-          "last": 0.97652,
-          "max_at": "2024-01-06T23:43:00Z",
-          "min_at": "2024-01-06T23:33:00Z"
-        },
-        "note": null,
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0011",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR exhausted OR rejecting request",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "stale"
-    },
-    {
-      "evidence_id": "E0012",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR exhausted OR rejecting request",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "stale"
-    },
-    {
-      "evidence_id": "E0013",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR exhausted OR rejecting request",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "stale"
-    },
-    {
-      "evidence_id": "E0014",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR exhausted OR rejecting request",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "stale"
-    },
-    {
-      "evidence_id": "E0015",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR exhausted OR rejecting request",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "stale"
-    },
-    {
-      "evidence_id": "E0016",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR queue OR rejecting OR exhausted",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0017",
-      "tool": "query_metrics",
-      "query": {
-        "limit": 25,
-        "tool": "query_metrics",
-        "service": "cart-e26",
-        "metric_name": "memory_utilization",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "step_seconds": 300
-      },
-      "observation": {
-        "record_count": 6,
-        "time_span": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-06T23:58:00Z"
-        },
-        "top_values": [
-          {
-            "value": "memory_utilization cart-e26",
-            "count": 6,
-            "first_seen": "2024-01-06T23:33:00Z"
-          }
-        ],
-        "key_attributes": {
-          "metric_name": [
-            "memory_utilization"
-          ],
-          "service": [
-            "cart-e26"
-          ]
-        },
-        "metric_stats": {
-          "min": 0.4343,
-          "max": 0.4624,
-          "mean": 0.447653,
-          "first": 0.44484,
-          "last": 0.44542,
-          "max_at": "2024-01-06T23:33:00Z",
-          "min_at": "2024-01-06T23:33:00Z"
-        },
-        "note": null,
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0018",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR queue OR rejecting OR exhausted",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0019",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR queue OR rejecting OR exhausted",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0020",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "cart-e26",
-        "time_range": {
-          "start": "2024-01-06T23:33:00Z",
-          "end": "2024-01-07T00:03:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": "timeout OR slow OR latency OR queue OR rejecting OR exhausted",
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
         "truncated": false
       },
       "reliability": "complete"

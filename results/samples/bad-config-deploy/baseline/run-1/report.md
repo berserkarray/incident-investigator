@@ -18,57 +18,66 @@
 
 ## Hypotheses
 
-### Rank 1: `H1` reviews-0ee / config_error
+### Rank 1: `H1` reviews-0ee / connection_pool_exhaustion
 
 - Confidence: 0.78 (before data-gap penalty: 0.78)
 - Revision: 1
-- Statement: The 00:34 UTC reduction of db.pool.max_connections to 5 caused connection starvation in reviews-0ee, driving the 5xx spike and latency increase.
+- Statement: The reviews service is failing because a config change reduced db.pool.max_connections from 50 to 5 shortly before the error spike, likely exhausting the database connection pool and causing elevated 5xx and latency.
 - Supporting evidence: `E0002`, `E0003`
 - Contradicting evidence: none
 - Evidence sufficient: no
-- Contributing factors: Error rate jumped from ~0.3-0.5% to 32% starting at 00:50 UTC., The only recent change found for reviews-0ee was a pool-size reduction 16 minutes before onset.
+- Contributing factors: Error rate jumps from ~0.3-0.5% to 32% starting at 00:50, Config change at 00:34 reduced db.pool.max_connections from 50 to 5, No matching error/warn logs were returned in the initial window
 - Missing evidence:
-  - Logs or metrics showing DB connection exhaustion, timeouts, or pool wait saturation after the config change.
-  - DB connection metric trend around the incident window to confirm saturation.
+  - Direct telemetry showing db connection saturation or pool exhaustion around the incident start (e.g., db_connections for reviews-0ee or related backend).
+  - Service logs around the onset containing connection timeout / pool exhaustion messages.
 
-### Rank 2: `H2` reviews-0ee / connection_pool_exhaustion
+### Rank 2: `H2` reviews-0ee / config_error
 
-- Confidence: 0.72 (before data-gap penalty: 0.72)
+- Confidence: 0.16 (before data-gap penalty: 0.16)
 - Revision: 1
-- Statement: The service exhausted its database connection pool after the max_connections reduction, causing request failures and high latency.
-- Supporting evidence: `E0002`, `E0003`
+- Statement: A bad configuration change on reviews-0ee caused the incident, with the pool-size reduction being the specific misconfiguration.
+- Supporting evidence: `E0003`, `E0002`
 - Contradicting evidence: none
 - Evidence sufficient: no
-- Contributing factors: The timing strongly matches the config change., The symptom pattern is consistent with request queuing and failures.
+- Contributing factors: A config change occurred 16 minutes before the observed spike, The change directly altered a database pool setting
 - Missing evidence:
-  - Direct evidence of pool exhaustion or connection acquisition failures in logs.
-  - DB connections metric to show the pool or database was saturated.
+  - Evidence that the config change alone, rather than downstream saturation, explains the failures.
 
-### Rank 3: `H3` reviews-0ee / dependency_timeout
+### Rank 3: `H3` reviews-0ee / deploy_regression
 
-- Confidence: 0.18 (before data-gap penalty: 0.18)
+- Confidence: 0.04 (before data-gap penalty: 0.04)
 - Revision: 1
-- Statement: An upstream dependency of reviews-0ee began timing out, and the service's elevated 5xx/latency are downstream symptoms rather than the root cause.
-- Supporting evidence: `E0004`, `E0002`
-- Contradicting evidence: `E0003`
-- Evidence sufficient: no
-- Contributing factors: reviews-0ee depends on checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54., No dependency telemetry was checked yet, so upstream failure remains possible.
-- Missing evidence:
-  - Logs or metrics from upstream dependencies during the incident window.
-  - Latency/error metrics for dependencies to identify a failing upstream component.
-
-### Rank 4: `H4` reviews-0ee / deploy_regression
-
-- Confidence: 0.05 (before data-gap penalty: 0.05)
-- Revision: 1
-- Statement: A recent deployment or code change in reviews-0ee introduced a regression that caused the outage.
+- Statement: A recent deployment to reviews-0ee introduced the failures, and the config change is coincidental.
 - Supporting evidence: `E0002`
 - Contradicting evidence: `E0003`
 - Evidence sufficient: no
-- Contributing factors: The service is clearly degraded, but no deployment was found in the recent change window., The only observed change was a config change, not a deployment.
+- Contributing factors: Symptoms begin after a recent change window
 - Missing evidence:
-  - Deployment history for reviews-0ee in the hours before onset.
-  - Error logs indicating application-level exceptions tied to a new build.
+  - Deployment records for reviews-0ee near the incident start showing a code rollout or rollback.
+
+### Rank 4: `H4` reviews-0ee / dependency_timeout
+
+- Confidence: 0.02 (before data-gap penalty: 0.02)
+- Revision: 1
+- Statement: An upstream dependency of reviews-0ee is timing out and causing the elevated 5xx/latency, independent of the config change.
+- Supporting evidence: `E0004`, `E0002`
+- Contradicting evidence: `E0003`
+- Evidence sufficient: no
+- Contributing factors: reviews-0ee depends on checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e, Upstream issues can manifest as elevated latency and 5xx
+- Missing evidence:
+  - Dependency-specific telemetry or logs showing timeout/error spikes in an upstream component around the incident start.
+
+### Rank 5: `H5` reviews-0ee / resource_exhaustion
+
+- Confidence: 0.00 (before data-gap penalty: 0.00)
+- Revision: 1
+- Statement: The service is experiencing a generic resource exhaustion unrelated to the database pool setting.
+- Supporting evidence: `E0002`
+- Contradicting evidence: `E0003`
+- Evidence sufficient: no
+- Contributing factors: Sustained 32% error rate could reflect a resource bottleneck
+- Missing evidence:
+  - Metrics for CPU, memory, disk, or request rate showing a non-database resource bottleneck.
 
 ## Superseded Hypotheses
 
@@ -76,10 +85,7 @@ _No entries._
 
 ## Facts
 
-- `F001` (baseline): The incident report's affected service is reviews-0ee. [`E0002`, `E0003`, `E0004`]
-- `F002` (baseline): The incident started at 2024-01-18T00:50:00Z. [`E0002`]
-- `F003` (baseline): HTTP 5xx rate on reviews-0ee rose sharply above normal and stayed elevated after 00:50 UTC. [`E0002`]
-- `F004` (baseline): A config change at 00:34 UTC reduced db.pool.max_connections from 50 to 5 on reviews-0ee. [`E0003`]
+_No entries._
 
 ## Assumptions
 
@@ -91,10 +97,11 @@ _No entries._
 
 ## Recommended Actions
 
-- `A1` [further_investigation] for `H1`: Inspect logs and DB connection metrics around 00:34-02:20 UTC for pool wait time, connection acquisition failures, and timeout patterns to confirm whether the reduced max_connections caused saturation. (evidence: `E0002`, `E0003`)
-- `A2` [further_investigation] for `H2`: Verify whether the database or client pool hit its connection ceiling after the config change, and compare against request latency/error spikes to confirm exhaustion. (evidence: `E0002`, `E0003`)
-- `A3` [further_investigation] for `H3`: Check upstream dependency logs and metrics for checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54 during the incident window to rule out a dependency timeout. (evidence: `E0002`, `E0004`)
-- `A4` [further_investigation] for `H4`: Review deployment history and application logs for reviews-0ee to rule out a coincident deploy regression. (evidence: `E0002`, `E0003`)
+- `A1` [further_investigation] for `H1`: Check database connection saturation and pool wait/timeout telemetry for reviews-0ee around 00:34-00:50 UTC to confirm or refute connection pool exhaustion. (evidence: `E0002`, `E0003`)
+- `A2` [mitigation] for `H1`: If the pool-size reduction is still in effect, restore db.pool.max_connections to the prior safe value and monitor error rate and latency. (evidence: `E0003`, `E0002`)
+- `A3` [fix] for `H2`: Review the config pipeline change to db.pool.max_connections and add guardrails/validation to prevent unsafe reductions. (evidence: `E0003`)
+- `A4` [further_investigation] for `H3`: Inspect deployment history for reviews-0ee around the incident window to rule in or out a rollout-related regression. (evidence: `E0002`)
+- `A5` [further_investigation] for `H4`: Query upstream dependency metrics/logs for checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e to check for timeout-driven failures. (evidence: `E0004`)
 
 ## Incident Report Claims
 
@@ -102,28 +109,26 @@ _No entries._
 |---|---|---|---|---|
 | `IC1` | HTTP 5xx rate on reviews-0ee above 25% | verified | `E0002` | none |
 | `IC2` | p99 latency on reviews-0ee several times above normal | verified | `E0002` | none |
-| `IC3` | The affected service is reviews-0ee. | verified | `E0002` | none |
-| `IC4` | The incident started at 2024-01-18T00:50:00+00:00. | verified | `E0002` | none |
+| `IC3` | The affected service is reviews-0ee. | verified | `E0002`, `E0003` | none |
+| `IC4` | The incident started at 2024-01-18T00:50:00+00:00. | verified | `E0002`, `E0003` | none |
 
 ## Missing Evidence
 
-- [reasoning_agent] for `H1`: Logs or metrics showing DB connection exhaustion, timeouts, or pool wait saturation after the config change.
-- [reasoning_agent] for `H1`: DB connection metric trend around the incident window to confirm saturation.
-- [reasoning_agent] for `H2`: Direct evidence of pool exhaustion or connection acquisition failures in logs.
-- [reasoning_agent] for `H2`: DB connections metric to show the pool or database was saturated.
-- [reasoning_agent] for `H3`: Logs or metrics from upstream dependencies during the incident window.
-- [reasoning_agent] for `H3`: Latency/error metrics for dependencies to identify a failing upstream component.
-- [reasoning_agent] for `H4`: Deployment history for reviews-0ee in the hours before onset.
-- [reasoning_agent] for `H4`: Error logs indicating application-level exceptions tied to a new build.
+- [reasoning_agent] for `H1`: Direct telemetry showing db connection saturation or pool exhaustion around the incident start (e.g., db_connections for reviews-0ee or related backend).
+- [reasoning_agent] for `H1`: Service logs around the onset containing connection timeout / pool exhaustion messages.
+- [reasoning_agent] for `H2`: Evidence that the config change alone, rather than downstream saturation, explains the failures.
+- [reasoning_agent] for `H3`: Deployment records for reviews-0ee near the incident start showing a code rollout or rollback.
+- [reasoning_agent] for `H4`: Dependency-specific telemetry or logs showing timeout/error spikes in an upstream component around the incident start.
+- [reasoning_agent] for `H5`: Metrics for CPU, memory, disk, or request rate showing a non-database resource bottleneck.
 
 ## Budget Usage
 
 | Budget | Used | Limit |
 |---|---|---|
-| Tool calls | 4 | 60 |
-| Tokens (input 8096, output 1337) | 9433 | 400000 |
+| Tool calls | 5 | 60 |
+| Tokens (input 16766, output 1422) | 18188 | 400000 |
 | Critic rounds | 0 | 3 |
-| Wall-clock seconds | 5.649 | 900 |
+| Wall-clock seconds | 7.942 | 900 |
 
 ## Evidence Appendix
 
@@ -162,3 +167,9 @@ _No entries._
   - upstream geo-api-38e (third_party_api) hops=2 (x1)
 - component: checkout-23b, front-lb-b54, geo-api-38e, mail-queue-53f, media-bbe
 - direction: downstream, upstream
+
+### `E0005` query_metrics (complete)
+
+- Query: `{"limit":25,"metric_name":"db_connections","service":"reviews-0ee","step_seconds":300,"time_range":{"end":"2024-01-18T02:20:00Z","start":"2024-01-18T00:20:00Z"},"tool":"query_metrics"}`
+- Records: 0
+- Note: no records matched

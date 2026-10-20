@@ -10,7 +10,7 @@
 
 ## Verdict
 
-**inconclusive**
+**conclusive**
 
 ## Termination
 
@@ -20,54 +20,61 @@
 
 ### Rank 1: `H1` orders-db-9d9 / database_failover
 
-- Confidence: 0.86 (before data-gap penalty: 0.86)
+- Confidence: 0.93 (before data-gap penalty: 0.93)
 - Revision: 1
-- Statement: orders-db-9d9 likely failed over to a read-only replica or otherwise became read-only around 08:07-08:10, causing shipping-1cd write attempts to fail and intermittent connection resets.
-- Supporting evidence: `E0001`, `E0002`, `E0004`
+- Statement: orders-db-9d9 likely entered a failover/read-only state or otherwise became unavailable for writes, causing shipping-1cd to fail order saves.
+- Supporting evidence: `E0001`, `E0005`
 - Contradicting evidence: none
-- Evidence sufficient: no
-- Contributing factors: Write attempts fail with 'cannot execute UPDATE in a read-only transaction', Intermittent SQLSTATE 08006 connection resets to orders-db-9d9, Error spike begins just before the reported start time
-- Missing evidence:
-  - Database-side logs or metrics confirming a failover, promotion, or replica read-only state change at the onset.
-  - Replication lag / connection / failover metrics for orders-db-9d9 around 08:10 UTC.
+- Evidence sufficient: yes
+- Contributing factors: Repeated write errors explicitly mention read-only transactions against orders-db-9d9., Connection resets during queries indicate database instability., Replication lag spiked sharply around the incident start.
 
-### Rank 2: `H2` orders-db-9d9 / connection_pool_exhaustion
+### Rank 2: `H2` orders-db-9d9 / network_partition
 
-- Confidence: 0.42 (before data-gap penalty: 0.42)
+- Confidence: 0.55 (before data-gap penalty: 0.55)
 - Revision: 1
-- Statement: A database connectivity issue on orders-db-9d9 may have caused resets and secondary read-only transaction errors seen by shipping-1cd.
+- Statement: A transient network or connectivity issue between shipping-1cd and orders-db-9d9 caused query resets and write failures.
 - Supporting evidence: `E0001`
-- Contradicting evidence: none
+- Contradicting evidence: `E0005`
 - Evidence sufficient: no
-- Contributing factors: Repeated connection reset errors, Could explain write failures as a downstream symptom
+- Contributing factors: Logs show SQLSTATE 08006 connection resets., The failure is upstream of the affected service.
 - Missing evidence:
-  - DB connection metrics or pool saturation evidence around the incident window.
-  - Logs from orders-db-9d9 showing pool exhaustion or connection churn.
+  - Database-side telemetry or logs showing whether connectivity errors coincided with failover, maintenance, or node loss.
 
 ### Rank 3: `H3` shipping-1cd / code_defect
 
 - Confidence: 0.18 (before data-gap penalty: 0.18)
 - Revision: 1
-- Statement: shipping-1cd may contain a write-path defect that mishandles database transaction state, surfacing as read-only transaction errors.
+- Statement: A defect in shipping-1cd's write path caused it to issue invalid updates or mishandle database errors.
 - Supporting evidence: `E0001`
-- Contradicting evidence: `E0003`
+- Contradicting evidence: `E0003`, `E0005`
 - Evidence sufficient: no
-- Contributing factors: Errors are emitted by shipping-1cd itself, No recent shipping-1cd deployments were found in the pre-incident window
+- Contributing factors: The service emits the observed failures., Application bugs can surface as write errors.
 - Missing evidence:
-  - Application release or config evidence for shipping-1cd outside the queried window, or code-level traces showing a local bug.
-  - More detailed application logs showing the exact code path leading to the failed UPDATE.
+  - Recent shipping-1cd deployment or config changes near the incident start that could explain a regression.
 
 ### Rank 4: `H4` shipping-1cd / deploy_regression
 
 - Confidence: 0.08 (before data-gap penalty: 0.08)
 - Revision: 1
-- Statement: A recent deployment or config change in shipping-1cd caused the write failures.
+- Statement: A recent shipping-1cd deployment introduced the write failures.
 - Supporting evidence: none
 - Contradicting evidence: `E0003`
 - Evidence sufficient: no
-- Contributing factors: Deployment/config changes are a common cause to check
+- Contributing factors: Deploy regressions are a common cause of sudden write-path failures.
 - Missing evidence:
-  - Any deployment/config/feature-flag change near 08:10 UTC for shipping-1cd.
+  - Any deployment/config/feature-flag change for shipping-1cd in the lookback window.
+
+### Rank 5: `H5` orders-db-9d9 / resource_exhaustion
+
+- Confidence: 0.04 (before data-gap penalty: 0.04)
+- Revision: 1
+- Statement: orders-db-9d9 was overloaded or resource constrained, leading to lag and intermittent write failures.
+- Supporting evidence: `E0005`
+- Contradicting evidence: `E0001`
+- Evidence sufficient: no
+- Contributing factors: Replication lag was elevated for a sustained period., Resource pressure can degrade database write availability.
+- Missing evidence:
+  - Database CPU, memory, disk, and connection metrics around the incident window.
 
 ## Superseded Hypotheses
 
@@ -87,10 +94,10 @@ _No entries._
 
 ## Recommended Actions
 
-- `A1` [further_investigation] for `H1`: Check orders-db-9d9 for failover/promotion events, read-only mode transitions, and replication health around 08:07-08:10 UTC. (evidence: `E0001`, `E0002`, `E0004`)
-- `A2` [mitigation] for `H1`: If the database is still read-only or unstable, restore primary writable access and verify shipping-1cd write success before reopening traffic. (evidence: `E0001`, `E0002`)
-- `A3` [further_investigation] for `H2`: Inspect database connection metrics and server logs for pool exhaustion or connection churn to determine whether connectivity issues preceded the write failures. (evidence: `E0001`)
-- `A4` [further_investigation] for `H3`: Review shipping-1cd application traces and any out-of-window releases/configuration to rule out a local write-path defect. (evidence: `E0001`, `E0003`)
+- `A1` [mitigation] for `H1`: Treat orders-db-9d9 as the primary fault domain: verify replica/primary role, restore write availability, and confirm shipping-1cd can save orders again. (evidence: `E0001`, `E0005`)
+- `A2` [further_investigation] for `H1`: Review database failover and replication events around 2024-01-05T08:10Z to determine why writes were rejected as read-only. (evidence: `E0001`, `E0005`)
+- `A3` [further_investigation] for `H2`: Check for network errors, node restarts, or routing issues between shipping-1cd and orders-db-9d9 if failover evidence is absent. (evidence: `E0001`)
+- `A4` [further_investigation] for `H3`: If database-side causes are ruled out, inspect shipping-1cd error handling and recent code paths that issue UPDATE statements. (evidence: `E0001`, `E0003`)
 
 ## Incident Report Claims
 
@@ -98,27 +105,21 @@ _No entries._
 |---|---|---|---|---|
 | `IC1` | HTTP 5xx rate on shipping-1cd above 15% | verified | `E0002` | none |
 | `IC2` | Orders submitted through shipping-1cd fail to save | verified | `E0001` | none |
-| `IC3` | The affected service is shipping-1cd. | verified | `E0001`, `E0002`, `E0004` | none |
+| `IC3` | The affected service is shipping-1cd. | verified | `E0001`, `E0004` | none |
 | `IC4` | The incident started at 2024-01-05T08:10:00+00:00. | verified | `E0001`, `E0002` | none |
 
 ## Missing Evidence
 
-- [reasoning_agent] for `H1`: Database-side logs or metrics confirming a failover, promotion, or replica read-only state change at the onset.
-- [reasoning_agent] for `H1`: Replication lag / connection / failover metrics for orders-db-9d9 around 08:10 UTC.
-- [reasoning_agent] for `H2`: DB connection metrics or pool saturation evidence around the incident window.
-- [reasoning_agent] for `H2`: Logs from orders-db-9d9 showing pool exhaustion or connection churn.
-- [reasoning_agent] for `H3`: Application release or config evidence for shipping-1cd outside the queried window, or code-level traces showing a local bug.
-- [reasoning_agent] for `H3`: More detailed application logs showing the exact code path leading to the failed UPDATE.
-- [reasoning_agent] for `H4`: Any deployment/config/feature-flag change near 08:10 UTC for shipping-1cd.
+_No entries._
 
 ## Budget Usage
 
 | Budget | Used | Limit |
 |---|---|---|
-| Tool calls | 4 | 60 |
-| Tokens (input 8484, output 1133) | 9617 | 400000 |
+| Tool calls | 5 | 60 |
+| Tokens (input 20242, output 1354) | 21596 | 400000 |
 | Critic rounds | 0 | 3 |
-| Wall-clock seconds | 5.088 | 900 |
+| Wall-clock seconds | 7.188 | 900 |
 
 ## Evidence Appendix
 
@@ -158,3 +159,12 @@ _No entries._
   - upstream session-cache-0da (cache) hops=1 (x1)
 - component: auth-d4f, jobs-queue-21c, orders-db-9d9, profile-609, public-lb-63f
 - direction: downstream, upstream
+
+### `E0005` query_metrics (complete)
+
+- Query: `{"limit":25,"metric_name":"replication_lag_s","service":"orders-db-9d9","step_seconds":600,"time_range":{"end":"2024-01-05T10:10:00Z","start":"2024-01-05T07:10:00Z"},"tool":"query_metrics"}`
+- Records: 13
+- Time span: 2024-01-05T07:10:00+00:00 – 2024-01-05T09:10:00+00:00
+  - replication_lag_s orders-db-9d9 (x13)
+- metric_name: replication_lag_s
+- service: orders-db-9d9

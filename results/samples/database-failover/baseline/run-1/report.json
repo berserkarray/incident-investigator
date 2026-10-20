@@ -9,7 +9,7 @@
     "start_time": "2024-01-05T08:10:00Z",
     "severity": "sev2"
   },
-  "verdict": "inconclusive",
+  "verdict": "conclusive",
   "termination_reason": "final_answer",
   "budget_limit": null,
   "hypotheses": [
@@ -19,30 +19,20 @@
       "revision": 1,
       "component": "orders-db-9d9",
       "cause_type": "database_failover",
-      "statement": "orders-db-9d9 likely failed over to a read-only replica or otherwise became read-only around 08:07-08:10, causing shipping-1cd write attempts to fail and intermittent connection resets.",
+      "statement": "orders-db-9d9 likely entered a failover/read-only state or otherwise became unavailable for writes, causing shipping-1cd to fail order saves.",
       "supporting_evidence_ids": [
         "E0001",
-        "E0002",
-        "E0004"
+        "E0005"
       ],
       "contradicting_evidence_ids": [],
-      "confidence": 0.86,
-      "raw_confidence": 0.86,
-      "evidence_sufficient": false,
-      "missing_evidence": [
-        {
-          "description": "Database-side logs or metrics confirming a failover, promotion, or replica read-only state change at the onset.",
-          "suggested_tool": "query_logs"
-        },
-        {
-          "description": "Replication lag / connection / failover metrics for orders-db-9d9 around 08:10 UTC.",
-          "suggested_tool": "query_metrics"
-        }
-      ],
+      "confidence": 0.93,
+      "raw_confidence": 0.93,
+      "evidence_sufficient": true,
+      "missing_evidence": [],
       "contributing_factors": [
-        "Write attempts fail with 'cannot execute UPDATE in a read-only transaction'",
-        "Intermittent SQLSTATE 08006 connection resets to orders-db-9d9",
-        "Error spike begins just before the reported start time"
+        "Repeated write errors explicitly mention read-only transactions against orders-db-9d9.",
+        "Connection resets during queries indicate database instability.",
+        "Replication lag spiked sharply around the incident start."
       ]
     },
     {
@@ -50,28 +40,26 @@
       "rank": 2,
       "revision": 1,
       "component": "orders-db-9d9",
-      "cause_type": "connection_pool_exhaustion",
-      "statement": "A database connectivity issue on orders-db-9d9 may have caused resets and secondary read-only transaction errors seen by shipping-1cd.",
+      "cause_type": "network_partition",
+      "statement": "A transient network or connectivity issue between shipping-1cd and orders-db-9d9 caused query resets and write failures.",
       "supporting_evidence_ids": [
         "E0001"
       ],
-      "contradicting_evidence_ids": [],
-      "confidence": 0.42,
-      "raw_confidence": 0.42,
+      "contradicting_evidence_ids": [
+        "E0005"
+      ],
+      "confidence": 0.55,
+      "raw_confidence": 0.55,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "DB connection metrics or pool saturation evidence around the incident window.",
-          "suggested_tool": "query_metrics"
-        },
-        {
-          "description": "Logs from orders-db-9d9 showing pool exhaustion or connection churn.",
+          "description": "Database-side telemetry or logs showing whether connectivity errors coincided with failover, maintenance, or node loss.",
           "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "Repeated connection reset errors",
-        "Could explain write failures as a downstream symptom"
+        "Logs show SQLSTATE 08006 connection resets.",
+        "The failure is upstream of the affected service."
       ]
     },
     {
@@ -80,29 +68,26 @@
       "revision": 1,
       "component": "shipping-1cd",
       "cause_type": "code_defect",
-      "statement": "shipping-1cd may contain a write-path defect that mishandles database transaction state, surfacing as read-only transaction errors.",
+      "statement": "A defect in shipping-1cd's write path caused it to issue invalid updates or mishandle database errors.",
       "supporting_evidence_ids": [
         "E0001"
       ],
       "contradicting_evidence_ids": [
-        "E0003"
+        "E0003",
+        "E0005"
       ],
       "confidence": 0.18,
       "raw_confidence": 0.18,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Application release or config evidence for shipping-1cd outside the queried window, or code-level traces showing a local bug.",
+          "description": "Recent shipping-1cd deployment or config changes near the incident start that could explain a regression.",
           "suggested_tool": "get_deployments"
-        },
-        {
-          "description": "More detailed application logs showing the exact code path leading to the failed UPDATE.",
-          "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "Errors are emitted by shipping-1cd itself",
-        "No recent shipping-1cd deployments were found in the pre-incident window"
+        "The service emits the observed failures.",
+        "Application bugs can surface as write errors."
       ]
     },
     {
@@ -111,7 +96,7 @@
       "revision": 1,
       "component": "shipping-1cd",
       "cause_type": "deploy_regression",
-      "statement": "A recent deployment or config change in shipping-1cd caused the write failures.",
+      "statement": "A recent shipping-1cd deployment introduced the write failures.",
       "supporting_evidence_ids": [],
       "contradicting_evidence_ids": [
         "E0003"
@@ -121,12 +106,39 @@
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Any deployment/config/feature-flag change near 08:10 UTC for shipping-1cd.",
+          "description": "Any deployment/config/feature-flag change for shipping-1cd in the lookback window.",
           "suggested_tool": "get_deployments"
         }
       ],
       "contributing_factors": [
-        "Deployment/config changes are a common cause to check"
+        "Deploy regressions are a common cause of sudden write-path failures."
+      ]
+    },
+    {
+      "hypothesis_id": "H5",
+      "rank": 5,
+      "revision": 1,
+      "component": "orders-db-9d9",
+      "cause_type": "resource_exhaustion",
+      "statement": "orders-db-9d9 was overloaded or resource constrained, leading to lag and intermittent write failures.",
+      "supporting_evidence_ids": [
+        "E0005"
+      ],
+      "contradicting_evidence_ids": [
+        "E0001"
+      ],
+      "confidence": 0.04,
+      "raw_confidence": 0.04,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Database CPU, memory, disk, and connection metrics around the incident window.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "Replication lag was elevated for a sustained period.",
+        "Resource pressure can degrade database write availability."
       ]
     }
   ],
@@ -137,30 +149,29 @@
   "recommended_actions": [
     {
       "action_id": "A1",
-      "text": "Check orders-db-9d9 for failover/promotion events, read-only mode transitions, and replication health around 08:07-08:10 UTC.",
-      "category": "further_investigation",
+      "text": "Treat orders-db-9d9 as the primary fault domain: verify replica/primary role, restore write availability, and confirm shipping-1cd can save orders again.",
+      "category": "mitigation",
       "hypothesis_id": "H1",
       "evidence_ids": [
         "E0001",
-        "E0002",
-        "E0004"
+        "E0005"
       ],
       "producer": "baseline"
     },
     {
       "action_id": "A2",
-      "text": "If the database is still read-only or unstable, restore primary writable access and verify shipping-1cd write success before reopening traffic.",
-      "category": "mitigation",
+      "text": "Review database failover and replication events around 2024-01-05T08:10Z to determine why writes were rejected as read-only.",
+      "category": "further_investigation",
       "hypothesis_id": "H1",
       "evidence_ids": [
         "E0001",
-        "E0002"
+        "E0005"
       ],
       "producer": "baseline"
     },
     {
       "action_id": "A3",
-      "text": "Inspect database connection metrics and server logs for pool exhaustion or connection churn to determine whether connectivity issues preceded the write failures.",
+      "text": "Check for network errors, node restarts, or routing issues between shipping-1cd and orders-db-9d9 if failover evidence is absent.",
       "category": "further_investigation",
       "hypothesis_id": "H2",
       "evidence_ids": [
@@ -170,7 +181,7 @@
     },
     {
       "action_id": "A4",
-      "text": "Review shipping-1cd application traces and any out-of-window releases/configuration to rule out a local write-path defect.",
+      "text": "If database-side causes are ruled out, inspect shipping-1cd error handling and recent code paths that issue UPDATE statements.",
       "category": "further_investigation",
       "hypothesis_id": "H3",
       "evidence_ids": [
@@ -210,7 +221,6 @@
       "status": "verified",
       "corroborating_ids": [
         "E0001",
-        "E0002",
         "E0004"
       ],
       "contradicting_ids": [],
@@ -229,67 +239,24 @@
       "label": "fact"
     }
   ],
-  "missing_evidence": [
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H1",
-      "description": "Database-side logs or metrics confirming a failover, promotion, or replica read-only state change at the onset.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H1",
-      "description": "Replication lag / connection / failover metrics for orders-db-9d9 around 08:10 UTC.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H2",
-      "description": "DB connection metrics or pool saturation evidence around the incident window.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H2",
-      "description": "Logs from orders-db-9d9 showing pool exhaustion or connection churn.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H3",
-      "description": "Application release or config evidence for shipping-1cd outside the queried window, or code-level traces showing a local bug.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H3",
-      "description": "More detailed application logs showing the exact code path leading to the failed UPDATE.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H4",
-      "description": "Any deployment/config/feature-flag change near 08:10 UTC for shipping-1cd.",
-      "ref": null
-    }
-  ],
+  "missing_evidence": [],
   "budget_usage": {
     "tool_calls": {
-      "used": 4.0,
+      "used": 5.0,
       "limit": 60.0
     },
     "tokens": {
-      "used": 9617.0,
+      "used": 21596.0,
       "limit": 400000.0
     },
-    "input_tokens": 8484,
-    "output_tokens": 1133,
+    "input_tokens": 20242,
+    "output_tokens": 1354,
     "critic_rounds": {
       "used": 0.0,
       "limit": 3.0
     },
     "wall_clock_s": {
-      "used": 5.088,
+      "used": 7.188,
       "limit": 900.0
     }
   },
@@ -474,6 +441,55 @@
           ]
         },
         "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0005",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "orders-db-9d9",
+        "metric_name": "replication_lag_s",
+        "time_range": {
+          "start": "2024-01-05T07:10:00Z",
+          "end": "2024-01-05T10:10:00Z"
+        },
+        "step_seconds": 600
+      },
+      "observation": {
+        "record_count": 13,
+        "time_span": {
+          "start": "2024-01-05T07:10:00Z",
+          "end": "2024-01-05T09:10:00Z"
+        },
+        "top_values": [
+          {
+            "value": "replication_lag_s orders-db-9d9",
+            "count": 13,
+            "first_seen": "2024-01-05T07:10:00Z"
+          }
+        ],
+        "key_attributes": {
+          "metric_name": [
+            "replication_lag_s"
+          ],
+          "service": [
+            "orders-db-9d9"
+          ]
+        },
+        "metric_stats": {
+          "min": 0.2846,
+          "max": 45.969,
+          "mean": 7.07375,
+          "first": 0.43331,
+          "last": 0.4015,
+          "max_at": "2024-01-05T08:00:00Z",
+          "min_at": "2024-01-05T07:30:00Z"
+        },
         "note": null,
         "truncated": false
       },

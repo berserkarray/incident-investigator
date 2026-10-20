@@ -19,30 +19,29 @@
       "revision": 1,
       "component": "payments-c30",
       "cause_type": "deploy_regression",
-      "statement": "A deployment to payments-c30 shortly before the onset introduced a regression that caused the sustained 5xx spike.",
+      "statement": "The 12:46 deployment to payments-c30 likely introduced a regression that caused the sharp rise in 5xx errors starting around 12:53.",
       "supporting_evidence_ids": [
         "E0003",
-        "E0001",
-        "E0002"
+        "E0002",
+        "E0001"
       ],
       "contradicting_evidence_ids": [],
-      "confidence": 0.46,
-      "raw_confidence": 0.46,
+      "confidence": 0.72,
+      "raw_confidence": 0.72,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Deployment diff or release notes showing what changed in build 346 and whether it touched request handling or upstream calls.",
+          "description": "Deployment diff or release notes for build 346 to identify the changed code paths and whether they affect request handling.",
           "suggested_tool": "get_deployments"
         },
         {
-          "description": "Service-specific logs or traces pinpointing the failing code path after the deployment.",
-          "suggested_tool": "query_logs"
+          "description": "Upstream service or dependency telemetry around the onset to rule out an external dependency failure coincident with the deploy.",
+          "suggested_tool": "query_metrics"
         }
       ],
       "contributing_factors": [
-        "A deployment occurred at 2024-01-16T12:46:10Z, about 7 minutes before the reported start time.",
-        "Error rate jumped from ~0.4% to ~12% soon after the deployment.",
-        "Logs show repeated 500/503 responses from payments-c30 during the incident window."
+        "Error rate jumps from ~0.4% to ~12% shortly after the deployment",
+        "Logs show repeated 500/503 responses after the change"
       ]
     },
     {
@@ -50,145 +49,79 @@
       "rank": 2,
       "revision": 1,
       "component": "payments-c30",
-      "cause_type": "dependency_timeout",
-      "statement": "payments-c30 is failing because one of its upstream dependencies is timing out or intermittently failing, causing 500/503 responses.",
+      "cause_type": "code_defect",
+      "statement": "A latent code defect in payments-c30, independent of the deployment itself, is causing the elevated 5xx responses.",
       "supporting_evidence_ids": [
         "E0001",
-        "E0002",
-        "E0004"
+        "E0002"
       ],
-      "contradicting_evidence_ids": [],
-      "confidence": 0.28,
-      "raw_confidence": 0.28,
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.18,
+      "raw_confidence": 0.18,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Logs or metrics from upstream dependencies around the incident window to identify which dependency degraded first.",
+          "description": "Error traces or stack traces from payments-c30 around the first 5xxs to identify a specific failing code path.",
           "suggested_tool": "query_logs"
-        },
-        {
-          "description": "Dependency-specific latency/error metrics for pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
-          "suggested_tool": "query_metrics"
         }
       ],
       "contributing_factors": [
-        "payments-c30 depends on pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
-        "The logs include TLS handshake resets and alternating 500/503s, which can be consistent with upstream instability.",
-        "The available evidence does not isolate the failing dependency."
+        "Persistent 5xxs and TLS resets indicate an application-level failure mode"
       ]
     },
     {
       "hypothesis_id": "H3",
       "rank": 3,
       "revision": 1,
-      "component": "payments-c30",
-      "cause_type": "load_balancer_misconfiguration",
-      "statement": "A downstream load balancer or routing issue is intermittently resetting TLS handshakes and contributing to the elevated errors.",
+      "component": "checkout-f18",
+      "cause_type": "dependency_timeout",
+      "statement": "An upstream dependency of payments-c30, possibly checkout-f18 or another upstream service, is timing out and causing payments-c30 to return 5xxs.",
       "supporting_evidence_ids": [
-        "E0001",
-        "E0004"
+        "E0004",
+        "E0001"
       ],
-      "contradicting_evidence_ids": [],
-      "confidence": 0.16,
-      "raw_confidence": 0.16,
-      "evidence_sufficient": false,
-      "missing_evidence": [
-        {
-          "description": "Logs or configuration changes for front-lb-7b6 around the incident window.",
-          "suggested_tool": "get_deployments"
-        },
-        {
-          "description": "Load balancer error/latency metrics or access logs to confirm handshake resets originated there.",
-          "suggested_tool": "query_metrics"
-        }
-      ],
-      "contributing_factors": [
-        "Logs show TLS handshake reset by peer errors.",
-        "payments-c30 has a downstream dependency on front-lb-7b6, so routing/TLS issues are plausible."
-      ]
-    },
-    {
-      "hypothesis_id": "H4",
-      "rank": 4,
-      "revision": 1,
-      "component": "payments-c30",
-      "cause_type": "resource_exhaustion",
-      "statement": "payments-c30 itself may be resource constrained, leading to elevated 5xx responses without an external dependency failure.",
-      "supporting_evidence_ids": [
-        "E0001",
+      "contradicting_evidence_ids": [
         "E0002"
       ],
-      "contradicting_evidence_ids": [],
-      "confidence": 0.1,
-      "raw_confidence": 0.1,
+      "confidence": 0.07,
+      "raw_confidence": 0.07,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "CPU, memory, disk, and connection-pool metrics for payments-c30 during the incident window.",
+          "description": "Metrics for upstream dependencies near the incident start, especially latency/error rates for checkout-f18, pricing-46a, tax-api-c44, ledger-db-fda, and object-cache-ec9.",
           "suggested_tool": "query_metrics"
-        },
-        {
-          "description": "Process or runtime logs indicating saturation, OOMs, or queue buildup.",
-          "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "Sustained 5xxs can result from local saturation or exhaustion.",
-        "No direct dependency failure has been confirmed yet."
+        "payments-c30 depends on checkout-f18, pricing-46a, tax-api-c44, ledger-db-fda, and object-cache-ec9"
       ]
     }
   ],
   "superseded_hypotheses": [],
-  "facts": [
-    {
-      "claim_id": "F001",
-      "producer": "baseline",
-      "text": "The incident report's symptom claim is supported: payments-c30's HTTP error rate rose above 10% during the incident window.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F002",
-      "producer": "baseline",
-      "text": "The affected service is payments-c30.",
-      "evidence_ids": [
-        "E0001",
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F003",
-      "producer": "baseline",
-      "text": "The incident start time of 2024-01-16T12:53:00Z is supported by the error-rate jump and matching error logs around that time.",
-      "evidence_ids": [
-        "E0001",
-        "E0002"
-      ]
-    }
-  ],
+  "facts": [],
   "assumptions": [],
   "data_gaps": [],
   "recommended_actions": [
     {
       "action_id": "A1",
-      "text": "Inspect the build 346 diff and release notes, then correlate the changed code paths with the first 5xxs to confirm or rule out a deploy regression.",
+      "text": "Review the build 346 deployment diff and rollout details, then correlate any changed request paths with the onset of 5xxs.",
       "category": "further_investigation",
       "hypothesis_id": "H1",
       "evidence_ids": [
         "E0003",
-        "E0001",
-        "E0002"
+        "E0002",
+        "E0001"
       ],
       "producer": "baseline"
     },
     {
       "action_id": "A2",
-      "text": "Check upstream dependency health and logs around 12:46-13:15 UTC, prioritizing pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
+      "text": "Inspect application error traces and stack traces from payments-c30 around 12:50-13:05 to isolate the failing code path.",
       "category": "further_investigation",
       "hypothesis_id": "H2",
       "evidence_ids": [
-        "E0004",
         "E0001",
         "E0002"
       ],
@@ -196,23 +129,12 @@
     },
     {
       "action_id": "A3",
-      "text": "Review front-lb-7b6 configuration and telemetry for TLS resets or routing anomalies during the incident window.",
+      "text": "Check upstream dependency health and latency around the incident start to determine whether an external timeout is propagating into payments-c30.",
       "category": "further_investigation",
       "hypothesis_id": "H3",
       "evidence_ids": [
-        "E0001",
-        "E0004"
-      ],
-      "producer": "baseline"
-    },
-    {
-      "action_id": "A4",
-      "text": "Pull payments-c30 resource metrics and runtime logs to check for saturation, queueing, or connection exhaustion during the spike.",
-      "category": "further_investigation",
-      "hypothesis_id": "H4",
-      "evidence_ids": [
-        "E0001",
-        "E0002"
+        "E0004",
+        "E0001"
       ],
       "producer": "baseline"
     }
@@ -224,7 +146,8 @@
       "text": "HTTP 5xx rate on payments-c30 above 10%",
       "status": "verified",
       "corroborating_ids": [
-        "E0002"
+        "E0002",
+        "E0001"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -247,8 +170,8 @@
       "text": "The incident started at 2024-01-16T12:53:00+00:00.",
       "status": "verified",
       "corroborating_ids": [
-        "E0001",
-        "E0002"
+        "E0002",
+        "E0001"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -258,49 +181,25 @@
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H1",
-      "description": "Deployment diff or release notes showing what changed in build 346 and whether it touched request handling or upstream calls.",
+      "description": "Deployment diff or release notes for build 346 to identify the changed code paths and whether they affect request handling.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H1",
-      "description": "Service-specific logs or traces pinpointing the failing code path after the deployment.",
+      "description": "Upstream service or dependency telemetry around the onset to rule out an external dependency failure coincident with the deploy.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H2",
-      "description": "Logs or metrics from upstream dependencies around the incident window to identify which dependency degraded first.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H2",
-      "description": "Dependency-specific latency/error metrics for pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
+      "description": "Error traces or stack traces from payments-c30 around the first 5xxs to identify a specific failing code path.",
       "ref": null
     },
     {
       "source": "reasoning_agent",
       "hypothesis_id": "H3",
-      "description": "Logs or configuration changes for front-lb-7b6 around the incident window.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H3",
-      "description": "Load balancer error/latency metrics or access logs to confirm handshake resets originated there.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H4",
-      "description": "CPU, memory, disk, and connection-pool metrics for payments-c30 during the incident window.",
-      "ref": null
-    },
-    {
-      "source": "reasoning_agent",
-      "hypothesis_id": "H4",
-      "description": "Process or runtime logs indicating saturation, OOMs, or queue buildup.",
+      "description": "Metrics for upstream dependencies near the incident start, especially latency/error rates for checkout-f18, pricing-46a, tax-api-c44, ledger-db-fda, and object-cache-ec9.",
       "ref": null
     }
   ],
@@ -310,17 +209,17 @@
       "limit": 60.0
     },
     "tokens": {
-      "used": 10146.0,
+      "used": 9834.0,
       "limit": 400000.0
     },
-    "input_tokens": 8759,
-    "output_tokens": 1387,
+    "input_tokens": 8947,
+    "output_tokens": 887,
     "critic_rounds": {
       "used": 0.0,
       "limit": 3.0
     },
     "wall_clock_s": {
-      "used": 5.987,
+      "used": 4.171,
       "limit": 900.0
     }
   },

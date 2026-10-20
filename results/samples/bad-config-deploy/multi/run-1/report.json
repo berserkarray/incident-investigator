@@ -14,129 +14,128 @@
   "budget_limit": null,
   "hypotheses": [
     {
-      "hypothesis_id": "H2",
+      "hypothesis_id": "H1",
       "rank": 1,
-      "revision": 2,
+      "revision": 1,
       "component": "reviews-0ee",
       "cause_type": "connection_pool_exhaustion",
-      "statement": "reviews-0ee likely exhausted its database connection pool after the pool limit was reduced from 50 to 5, causing request queuing, elevated latency, and 5xx errors.",
+      "statement": "A config change on reviews-0ee reduced db.pool.max_connections from 50 to 5, causing connection pool exhaustion that drove the 5xx spike and latency increase.",
       "supporting_evidence_ids": [
         "E0003",
-        "E0005",
-        "E0007"
+        "E0002",
+        "E0005"
       ],
       "contradicting_evidence_ids": [],
-      "confidence": 0.9,
-      "raw_confidence": 0.9,
+      "confidence": 0.86,
+      "raw_confidence": 0.86,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Direct pool saturation evidence such as pool waiters, connection acquisition latency, or exhausted connection counts at the incident onset.",
+          "description": "Current database connection pool saturation metrics or wait-time evidence around 00:34-00:50Z",
           "suggested_tool": "query_metrics"
         },
         {
-          "description": "Additional logs or traces showing request queuing or repeated connection acquisition failures immediately after the config change.",
+          "description": "Application logs showing connection acquisition timeouts or pool exhaustion errors",
           "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "Config change reduced db.pool.max_connections from 50 to 5 shortly before symptoms",
-        "Repeated log errors report timed out waiting for a database connection",
-        "p99 latency rose sharply in the same window"
+        "Directly affected the incident service",
+        "Timing is close to observed onset",
+        "Explains both elevated errors and latency"
       ]
     },
     {
-      "hypothesis_id": "H1",
+      "hypothesis_id": "H2",
       "rank": 2,
-      "revision": 2,
+      "revision": 1,
       "component": "reviews-0ee",
       "cause_type": "config_error",
-      "statement": "A configuration change on reviews-0ee mis-sized the database pool, and the resulting config error directly caused the incident symptoms.",
+      "statement": "The incident was caused by an erroneous configuration change on reviews-0ee, with the reduced database pool limit being the triggering misconfiguration rather than a deeper code or dependency fault.",
       "supporting_evidence_ids": [
         "E0003",
-        "E0005",
-        "E0007"
+        "E0002"
       ],
       "contradicting_evidence_ids": [],
-      "confidence": 0.84,
-      "raw_confidence": 0.84,
+      "confidence": 0.67,
+      "raw_confidence": 0.67,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Evidence that the new pool setting was intended and safe for expected traffic, or that another config parameter also changed.",
-          "suggested_tool": "get_deployments"
+          "description": "Evidence that the config change alone, rather than another concurrent issue, explains the full error and latency pattern",
+          "suggested_tool": "query_metrics"
         },
         {
-          "description": "Metrics or traces tying the config change to request queuing and 5xx generation rather than a coincidental timing overlap.",
-          "suggested_tool": "query_metrics"
+          "description": "Rollback or comparison data showing behavior before and after the config change",
+          "suggested_tool": "get_deployments"
         }
       ],
       "contributing_factors": [
-        "Recent config change is the only observed change near onset",
-        "Timeout errors appeared after the change",
-        "Latency and error rate both worsened after the change"
+        "Confirmed config change on the affected service",
+        "Error rate rose after the change"
       ]
     },
     {
       "hypothesis_id": "H3",
       "rank": 3,
-      "revision": 2,
+      "revision": 1,
       "component": "reviews-0ee",
-      "cause_type": "dependency_timeout",
-      "statement": "An upstream dependency of reviews-0ee intermittently timed out, and reviews-0ee surfaced those failures as 5xx and higher latency.",
-      "supporting_evidence_ids": [
-        "E0004",
-        "E0002"
-      ],
-      "contradicting_evidence_ids": [
-        "E0005"
-      ],
-      "confidence": 0.28,
-      "raw_confidence": 0.28,
-      "evidence_sufficient": false,
-      "missing_evidence": [
-        {
-          "description": "Current logs or traces showing timeout failures to checkout-23b, media-bbe, session-cache-8e3, or geo-api-38e around onset.",
-          "suggested_tool": "query_logs"
-        },
-        {
-          "description": "Dependency-specific latency or error metrics demonstrating an upstream outage or slowdown at the same time.",
-          "suggested_tool": "query_metrics"
-        }
-      ],
-      "contributing_factors": [
-        "reviews-0ee has several upstream dependencies that could fail independently",
-        "Observed symptoms could be secondary to upstream slowness"
-      ]
-    },
-    {
-      "hypothesis_id": "H4",
-      "rank": 4,
-      "revision": 2,
-      "component": "reviews-0ee",
-      "cause_type": "code_defect",
-      "statement": "The config change exposed or triggered an application bug in reviews-0ee's database handling, leading to connection timeout failures and elevated 5xx/latency.",
+      "cause_type": "resource_exhaustion",
+      "statement": "Reducing max database connections to 5 may have created an internal resource bottleneck on reviews-0ee, leading to request queuing and elevated latency with secondary 5xxs.",
       "supporting_evidence_ids": [
         "E0003",
         "E0005"
       ],
       "contradicting_evidence_ids": [],
-      "confidence": 0.2,
-      "raw_confidence": 0.2,
+      "confidence": 0.54,
+      "raw_confidence": 0.54,
       "evidence_sufficient": false,
       "missing_evidence": [
         {
-          "description": "Stack traces or application error details indicating a code path bug rather than pure resource shortage.",
-          "suggested_tool": "query_logs"
+          "description": "Thread/worker saturation or request queue depth metrics for reviews-0ee during the incident window",
+          "suggested_tool": "query_metrics"
         },
         {
-          "description": "Deployment or code-change evidence showing a recent application change correlated with the onset.",
-          "suggested_tool": "get_deployments"
+          "description": "Logs or traces showing requests blocked waiting on internal resources",
+          "suggested_tool": "query_logs"
         }
       ],
       "contributing_factors": [
-        "Timeouts may reflect an application-level handling issue",
-        "No code deployment evidence is currently present"
+        "Explains latency spike well",
+        "Could manifest as partial error increase under load"
+      ]
+    },
+    {
+      "hypothesis_id": "H4",
+      "rank": 4,
+      "revision": 1,
+      "component": "reviews-0ee",
+      "cause_type": "dependency_timeout",
+      "statement": "An upstream dependency of reviews-0ee may have slowed or timed out, and the service change merely coincided with the onset of the incident.",
+      "supporting_evidence_ids": [
+        "E0004",
+        "E0002",
+        "E0005"
+      ],
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.22,
+      "raw_confidence": 0.22,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Dependency-specific latency/error metrics for checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54 around the incident window",
+          "suggested_tool": "query_metrics"
+        },
+        {
+          "description": "Logs or traces identifying which upstream call path timed out",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "reviews-0ee depends on several upstream services and a third-party API",
+        "Upstream issues can produce both latency and 5xxs"
       ]
     }
   ],
@@ -144,133 +143,66 @@
   "facts": [
     {
       "claim_id": "F001",
-      "producer": "observability",
-      "text": "reviews-0ee error_rate jumped from a baseline around 0.003-0.005 to 0.32 starting at 2024-01-18T00:40Z and stayed at 0.32 through the queried range.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F002",
-      "producer": "observability",
-      "text": "No error or warn log records matched the queried reviews-0ee window, so logs did not show a detectable change in that range.",
-      "evidence_ids": [
-        "E0001"
-      ]
-    },
-    {
-      "claim_id": "F003",
       "producer": "dependency",
-      "text": "reviews-0ee had a config change at 2024-01-18T00:34:00Z setting db.pool.max_connections from 50 to 5; this is on the affected service itself and directly in its database access path, making it the most relevant recent dependency-related change near the incident start.",
+      "text": "reviews-0ee had a config change at 2024-01-18T00:34:00Z that reduced db.pool.max_connections from 50 to 5 on the affected service itself, which is a plausible direct contributor to elevated 5xx/latency near the incident start.",
       "evidence_ids": [
         "E0003"
       ]
     },
     {
-      "claim_id": "F004",
+      "claim_id": "F002",
       "producer": "dependency",
-      "text": "reviews-0ee depends upstream on checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e, and has downstream front-lb-b54; this places the affected service in a path where upstream issues could also surface as reviews-0ee errors, but no recent change in those dependencies is evidenced here.",
+      "text": "reviews-0ee is downstream of front-lb-b54 and upstream of checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e; these are the relevant dependency-path components to inspect for upstream or adjacent failures affecting reviews-0ee.",
       "evidence_ids": [
         "E0004"
       ]
     },
     {
-      "claim_id": "F005",
+      "claim_id": "F003",
       "producer": "observability",
-      "text": "reviews-0ee error_rate rose sharply and peaked at 0.32 at 2024-01-18T00:40:00Z, consistent with the reported 5xx surge.",
+      "text": "reviews-0ee error_rate changed from a low baseline to sustained 32% errors, with onset at 2024-01-18T00:40:00Z and clearly elevated by 00:50Z.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F004",
+      "producer": "observability",
+      "text": "reviews-0ee latency_p99_ms spiked from normal levels to over 1s, with onset at 2024-01-18T00:45:00Z and sustained elevation from 00:50Z onward.",
+      "evidence_ids": [
+        "E0005"
+      ]
+    },
+    {
+      "claim_id": "F005",
+      "producer": "reporting",
+      "text": "reviews-0ee error_rate rose from a low baseline to a sustained 32% during the incident window.",
       "evidence_ids": [
         "E0002"
       ]
     },
     {
       "claim_id": "F006",
-      "producer": "observability",
-      "text": "reviews-0ee began emitting repeated error logs for database connection acquisition timeouts starting at 2024-01-18T00:46:06.458639Z, which supports request queuing/pool exhaustion after the pool size reduction.",
+      "producer": "reporting",
+      "text": "reviews-0ee p99 latency exceeded 1 second shortly after the error spike began.",
       "evidence_ids": [
         "E0005"
       ]
     },
     {
       "claim_id": "F007",
-      "producer": "observability",
-      "text": "A config change on reviews-0ee set db.pool.max_connections from 50 to 5 at 2024-01-18T00:34:00Z, and connection-timeout errors appeared shortly afterward, making the config change a plausible trigger for the elevated 5xx/latency symptoms.",
+      "producer": "reporting",
+      "text": "A config change on reviews-0ee reduced db.pool.max_connections from 50 to 5 shortly before the incident.",
       "evidence_ids": [
-        "E0003",
-        "E0005"
+        "E0003"
       ]
     },
     {
       "claim_id": "F008",
-      "producer": "observability",
-      "text": "reviews-0ee shows a sharp increase in p99 latency starting at 2024-01-18T00:45:00Z, rising from ~170-190 ms to 1041.2161 ms and staying there through the queried range.",
-      "evidence_ids": [
-        "E0007"
-      ]
-    },
-    {
-      "claim_id": "F009",
-      "producer": "observability",
-      "text": "reviews-0ee shows elevated error_rate beginning by 2024-01-18T00:40:00Z, reaching 0.32 at peak in the queried window.",
-      "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F010",
-      "producer": "observability",
-      "text": "reviews-0ee logs show error-level request failures with the pattern 'timed out waiting for a database connection' starting at 2024-01-18T00:46:06.458639Z.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F011",
-      "producer": "observability",
-      "text": "reviews-0ee had a config change at 2024-01-18T00:34:00Z that set db.pool.max_connections from 50 to 5, which is temporally close to the onset of the latency and timeout symptoms.",
-      "evidence_ids": [
-        "E0003"
-      ]
-    },
-    {
-      "claim_id": "F012",
       "producer": "reporting",
-      "text": "reviews-0ee error_rate jumped from a baseline around 0.003-0.005 to 0.32 starting at 2024-01-18T00:40:00Z and stayed elevated through the queried range.",
+      "text": "reviews-0ee depends on front-lb-b54 and has downstream/upstream relationships that should be considered when validating the incident path.",
       "evidence_ids": [
-        "E0002"
-      ]
-    },
-    {
-      "claim_id": "F013",
-      "producer": "reporting",
-      "text": "The service had a config change at 2024-01-18T00:34:00Z setting db.pool.max_connections from 50 to 5.",
-      "evidence_ids": [
-        "E0003"
-      ]
-    },
-    {
-      "claim_id": "F014",
-      "producer": "reporting",
-      "text": "Repeated error logs reported timed out waiting for a database connection starting at 2024-01-18T00:46:06.458639Z.",
-      "evidence_ids": [
-        "E0005"
-      ]
-    },
-    {
-      "claim_id": "F015",
-      "producer": "reporting",
-      "text": "p99 latency rose sharply to 1041.2161 ms at 2024-01-18T00:45:00Z and remained elevated.",
-      "evidence_ids": [
-        "E0007"
-      ]
-    },
-    {
-      "claim_id": "F016",
-      "producer": "reporting",
-      "text": "The evidence most strongly supports connection-pool exhaustion or mis-sizing on reviews-0ee as the incident driver.",
-      "evidence_ids": [
-        "E0003",
-        "E0005",
-        "E0007"
+        "E0004"
       ]
     }
   ],
@@ -279,68 +211,58 @@
   "recommended_actions": [
     {
       "action_id": "A1",
-      "text": "Restore the database connection pool to a safe value and validate the service under expected traffic; the pool reduction from 50 to 5 is the most plausible trigger for the observed connection-timeout errors, latency spike, and 5xx surge.",
+      "text": "Restore db.pool.max_connections on reviews-0ee to a safe operating value and validate database capacity before reapplying any lower limit; the observed error-rate and latency spike followed the reduction to 5 connections.",
       "category": "fix",
-      "hypothesis_id": "H2",
+      "hypothesis_id": "H1",
       "evidence_ids": [
         "E0003",
-        "E0005",
-        "E0007"
+        "E0002",
+        "E0005"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A2",
-      "text": "If the service is still degraded, temporarily increase available database connections or roll back the pool limit change to relieve request queuing and connection-acquisition timeouts.",
+      "text": "If connection saturation recurs, temporarily increase the pool limit and/or scale database capacity for reviews-0ee to relieve request blocking while the root cause is corrected.",
       "category": "mitigation",
-      "hypothesis_id": "H2",
+      "hypothesis_id": "H1",
       "evidence_ids": [
-        "E0005",
-        "E0007"
+        "E0003",
+        "E0002",
+        "E0005"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A3",
-      "text": "Add a deployment/configuration guardrail for db.pool.max_connections changes, including approval, safe defaults, and automated checks that block reductions likely to exhaust the pool under normal load.",
+      "text": "Add a configuration review and change-guardrail for database pool settings on reviews-0ee so reductions in max_connections require explicit capacity checks and approval before rollout.",
       "category": "prevention",
-      "hypothesis_id": "H1",
+      "hypothesis_id": "H2",
       "evidence_ids": [
         "E0003",
-        "E0005",
-        "E0007"
+        "E0002"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A4",
-      "text": "Add alerting and dashboards for connection-pool saturation signals, including pool wait time, exhausted connections, and request timeout rates, so future mis-sizing is detected before 5xx errors rise.",
+      "text": "Add alerting and dashboards for connection pool utilization, request queue depth, and worker/thread saturation on reviews-0ee so resource bottlenecks are detected before they drive 5xxs and latency spikes.",
       "category": "prevention",
-      "hypothesis_id": "H1",
+      "hypothesis_id": "H3",
       "evidence_ids": [
         "E0003",
-        "E0005",
-        "E0007"
+        "E0005"
       ],
       "producer": "reporting_agent"
     },
     {
       "action_id": "A5",
-      "text": "Verify whether any upstream dependency of reviews-0ee was slow or failing at incident onset by checking dependency-specific logs and metrics for checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e.",
-      "category": "further_investigation",
-      "hypothesis_id": "H3",
-      "evidence_ids": [
-        "E0004"
-      ],
-      "producer": "reporting_agent"
-    },
-    {
-      "action_id": "A6",
-      "text": "Review application traces and stack details for the connection-timeout path to rule out an underlying code defect that could have been exposed by the pool-size change.",
+      "text": "Inspect dependency latency/error metrics and traces for front-lb-b54, checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e around the incident window to conclusively rule out an upstream timeout path.",
       "category": "further_investigation",
       "hypothesis_id": "H4",
       "evidence_ids": [
-        "E0003",
+        "E0004",
+        "E0002",
         "E0005"
       ],
       "producer": "reporting_agent"
@@ -364,7 +286,7 @@
       "text": "p99 latency on reviews-0ee several times above normal",
       "status": "verified",
       "corroborating_ids": [
-        "E0007"
+        "E0005"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -376,7 +298,7 @@
       "status": "verified",
       "corroborating_ids": [
         "E0002",
-        "E0003"
+        "E0005"
       ],
       "contradicting_ids": [],
       "label": "fact"
@@ -385,33 +307,30 @@
       "claim_id": "IC4",
       "kind": "start_time",
       "text": "The incident started at 2024-01-18T00:50:00+00:00.",
-      "status": "contradicted",
+      "status": "unverified",
       "corroborating_ids": [],
-      "contradicting_ids": [
-        "E0002",
-        "E0003"
-      ],
-      "label": "fact"
+      "contradicting_ids": [],
+      "label": "assumption"
     }
   ],
   "missing_evidence": [],
   "budget_usage": {
     "tool_calls": {
-      "used": 7.0,
+      "used": 6.0,
       "limit": 60.0
     },
     "tokens": {
-      "used": 51218.0,
+      "used": 31523.0,
       "limit": 400000.0
     },
-    "input_tokens": 46361,
-    "output_tokens": 4857,
+    "input_tokens": 28999,
+    "output_tokens": 2524,
     "critic_rounds": {
-      "used": 2.0,
+      "used": 1.0,
       "limit": 3.0
     },
     "wall_clock_s": {
-      "used": 25.188,
+      "used": 14.76,
       "limit": 900.0
     }
   },
@@ -598,76 +517,6 @@
     },
     {
       "evidence_id": "E0005",
-      "tool": "query_logs",
-      "query": {
-        "limit": 25,
-        "tool": "query_logs",
-        "service": "reviews-0ee",
-        "time_range": {
-          "start": "2024-01-18T00:34:00Z",
-          "end": "2024-01-18T01:10:00Z"
-        },
-        "levels": [
-          "error",
-          "warn"
-        ],
-        "text": null,
-        "attributes": null
-      },
-      "observation": {
-        "record_count": 16,
-        "time_span": {
-          "start": "2024-01-18T00:46:06.458639Z",
-          "end": "2024-01-18T01:08:37.687487Z"
-        },
-        "top_values": [
-          {
-            "value": "error reviews-0ee: request failed: timed out waiting for a database connection (pool size #)",
-            "count": 16,
-            "first_seen": "2024-01-18T00:46:06.458639Z"
-          }
-        ],
-        "key_attributes": {
-          "level": [
-            "error"
-          ],
-          "service": [
-            "reviews-0ee"
-          ]
-        },
-        "metric_stats": null,
-        "note": null,
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0006",
-      "tool": "query_metrics",
-      "query": {
-        "limit": 25,
-        "tool": "query_metrics",
-        "service": "reviews-0ee",
-        "metric_name": "db_connections",
-        "time_range": {
-          "start": "2024-01-18T00:20:00Z",
-          "end": "2024-01-18T01:20:00Z"
-        },
-        "step_seconds": 300
-      },
-      "observation": {
-        "record_count": 0,
-        "time_span": null,
-        "top_values": [],
-        "key_attributes": {},
-        "metric_stats": null,
-        "note": "no records matched",
-        "truncated": false
-      },
-      "reliability": "complete"
-    },
-    {
-      "evidence_id": "E0007",
       "tool": "query_metrics",
       "query": {
         "limit": 25,
@@ -675,22 +524,22 @@
         "service": "reviews-0ee",
         "metric_name": "latency_p99_ms",
         "time_range": {
-          "start": "2024-01-18T00:20:00Z",
-          "end": "2024-01-18T01:20:00Z"
+          "start": "2024-01-18T00:40:00Z",
+          "end": "2024-01-18T01:10:00Z"
         },
         "step_seconds": 300
       },
       "observation": {
-        "record_count": 12,
+        "record_count": 6,
         "time_span": {
-          "start": "2024-01-18T00:20:00Z",
-          "end": "2024-01-18T01:15:00Z"
+          "start": "2024-01-18T00:40:00Z",
+          "end": "2024-01-18T01:05:00Z"
         },
         "top_values": [
           {
             "value": "latency_p99_ms reviews-0ee",
-            "count": 12,
-            "first_seen": "2024-01-18T00:20:00Z"
+            "count": 6,
+            "first_seen": "2024-01-18T00:40:00Z"
           }
         ],
         "key_attributes": {
@@ -704,8 +553,8 @@
         "metric_stats": {
           "min": 162.8202,
           "max": 1041.2161,
-          "mean": 637.960778,
-          "first": 179.41648,
+          "mean": 809.965237,
+          "first": 171.97608,
           "last": 1041.2161,
           "max_at": "2024-01-18T00:45:00Z",
           "min_at": "2024-01-18T00:40:00Z"
