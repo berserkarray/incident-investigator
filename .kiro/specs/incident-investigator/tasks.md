@@ -317,26 +317,26 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 26: Hypothesis identity and sufficiency are code-enforced.** **Validates: Requirements 10.8, 10.9**
   - [ ] 7.11 Branch checkpoint: tests green on `ws/agents`, rebased on `main`.
 
-- [ ] 8. Workstream `ws/eval-baseline`: baseline, Evaluator and `cli eval`
-  - [ ] 8.1 Write the ReAct Baseline_Agent
+- [x] 8. Workstream `ws/eval-baseline`: baseline, Evaluator and `cli eval`
+  - [x] 8.1 Write the ReAct Baseline_Agent
     - `baseline/react.py`: claims recorded as `unverified`; sequential `baseline_step` loop while budgets and the timeout allow; one Tool_Request or a final answer per step; the same Observation format as the Specialists; one retry per failed step, then a Data_Gap and `baseline_failed`; final answer → Citation_Validator → Confidence_Policy → `baseline_verdict` → ReportAssembler with `final_answer`; budget or timeout stops → DRG within 5 s with the matching reason. Uses its own Blackboard as the Run_Ledger and the same config fields as the Investigator.
     - _Requirements: 25.1, 25.2, 25.3, 25.4, 25.5, 25.6, 25.7, 25.8, 25.9, 25.10_
-  - [ ] 8.2 Write the Evaluator runner
+  - [x] 8.2 Write the Evaluator runner
     - `evaluation/runner.py`: `run_seed()` from design; sequential Runs ordered by scenario, run index, multi before baseline; per-Run outputs under `out/runs/<scenario>/<system>/run-<k>/`; latency from Run start to the JSON write; any exception → failed `RunScore`, then continue; `IsolationScanner` over each Run's artifacts.
     - The Evaluator is the only non-test code that reads the Answer_Key_Root, and it passes Runs only `InvestigatorConfig`, the snapshot path and the Incident_Report.
     - _Requirements: 24.4, 24.7, 26.1, 26.2, 26.3, 26.4, 26.7, 26.10, 27.6_
-  - [ ] 8.3 Write the scoring and metrics
+  - [x] 8.3 Write the scoring and metrics
     - `evaluation/metrics.py`: `score_run()` (pure) with top-1, top-3, the match rule, citation precision V/C via the Support_Check (0.0 for no citations or a failed Run), Key_Evidence recall F/K (n/a when K = 0), Tool_Call count from the trace, token counts, expected Data_Gap matches (same source and reason), ranking hit@3, and the over-cautious and over-confident indicators.
     - _Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 27.6, 27.7, 27.9, 27.10, 27.11, 27.12, 27.13, 27.14, 27.15, 27.16_
-  - [ ] 8.4 Write aggregation and the Results_Table
+  - [x] 8.4 Write aggregation and the Results_Table
     - `aggregate()`: per scenario × system and pooled "ALL" rows; mean ± `statistics.stdev` (0.0 for one value); failed Runs in top-1, top-3 and hit@3, excluded from the other metrics; rates over non-failed Runs; unavailable and n/a cells.
     - `render_results_markdown()` with accuracy, grounding, cost and a separate diagnostics group; JSON with identical values and header fields (provider, model, Seed, Run count, date, exact command, failed-Run counts).
     - _Requirements: 26.5, 26.9, 27.8, 27.17, 31.6_
-  - [ ] 8.5 Write `cli eval` and `investigate --system baseline`
+  - [x] 8.5 Write `cli eval` and `investigate --system baseline`
     - `eval --config FILE --out DIR [--scenario NAME ...] [--system multi|baseline] [--runs 1..10]` with option validation before any Run; API-key presence check for `openai`.
     - Wire `--system baseline` into `investigate`.
     - _Requirements: 26.6, 26.8, 28.2, 28.4, 28.5, 28.6_
-  - [ ] 8.6 Write scoring-rule tests
+  - [x] 8.6 Write scoring-rule tests
     - Top-1 and top-3 for all four combinations of key outcome × Verdict; Component case and whitespace variants; fewer than 3 Hypotheses; failed Runs; hit@3 regardless of Verdict and n/a for the insufficient marker; over-cautious and over-confident indicators; citation precision with zero citations; recall n/a; aggregation with an all-failed cell.
     - _Requirements: 26.9, 27.1, 27.2, 27.3, 27.4, 27.5, 27.10, 27.11, 27.12, 27.13, 27.14, 27.15, 27.16, 27.17_
   - [ ]* 8.7 Property tests for evaluation (lower priority)
@@ -346,7 +346,14 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 61: Scoring is deterministic.** **Validates: Requirements 27.7, 27.9**
     - **Property 62: Aggregation.** **Validates: Requirements 26.9, 27.8, 27.17**
     - **Property 63: Results_Table Markdown matches JSON.** **Validates: Requirements 26.5**
-  - [ ] 8.8 Branch checkpoint: tests green on `ws/eval-baseline`, rebased on `main`.
+  - [x] 8.8 Branch checkpoint: tests green on `ws/eval-baseline`, rebased on `main`.
+
+  - Notes from this workstream (for integration in 10.1):
+    - The Support_Check (design D2) is in `evaluation/support.py`, because `state/support.py` belongs to task 6.3. `score_run` takes the checker as a parameter; at integration, keep one implementation.
+    - The OfflineResponder has a minimal `baseline_step` rule (the D4 probe sequence, then a final answer from the `reasoning` heuristic). Task 7.7 owns the full responder; reconcile the handler table on merge.
+    - The Baseline_Agent builds its ToolLayer the same way as `orchestrator/run.py`. `tests/unit/test_baseline.py::test_baseline_tool_layer_matches_the_investigator` fails if the injector, breaker, retry, budget or summariser differ, so wiring 5.2 and 5.4 into one system must wire both.
+    - The Baseline_Agent has no Reporting_Agent, so its LLM gate stops at the full token Budget (no reserve). It keeps using today's `LLMGateway(client, usage, trace, limits, model)` signature.
+    - `eval` takes `--scenarios DIR` (default `scenarios`), like `generate`, to locate the Scenario_Catalogue.
 
 - [ ] 9. Workstream `ws/tests`: cross-cutting tests
   - [ ] 9.1 Write the scripted-run harness

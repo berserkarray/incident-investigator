@@ -7,6 +7,7 @@ written, whatever the Verdict. Argument errors exit 2; every other failure exits
 import argparse
 import asyncio
 import os
+import shlex
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -102,8 +103,6 @@ def cmd_investigate(args: argparse.Namespace) -> int:
         raise CliError(f"--incident {incident_dir} is not an incident snapshot directory under {snapshot_root}")
     if _inside(args.out, snapshot_root):
         raise CliError(f"--out {args.out} must not be inside the snapshot root {snapshot_root}")
-    if args.system == "baseline":
-        raise CliError("--system baseline is not available in this build yet")
     _require_api_key(config)
     clock = SystemClock()
     try:
@@ -116,17 +115,84 @@ def cmd_investigate(args: argparse.Namespace) -> int:
     except IncidentReportError as exc:
         raise CliError(str(exc)) from None
 
-    from .orchestrator.run import run_investigator
     from .report.writer import FileRunOutputSink
+
+    if args.system == "baseline":
+        from .baseline.react import run_baseline as run_system
+    else:
+        from .orchestrator.run import run_investigator as run_system
 
     redactor = SecretRedactor.from_env()
     inputs = RunInputs(snapshot_dir=incident_dir, incident_report=report, config=config.for_system_under_test())
     deps = RunDependencies(llm_client=client, clock=clock, redactor=redactor)
     try:
-        result = asyncio.run(run_investigator(inputs, deps, FileRunOutputSink(args.out, redactor)))
+        result = asyncio.run(run_system(inputs, deps, FileRunOutputSink(args.out, redactor)))
     except SnapshotLoadError as exc:
         raise CliError(str(exc)) from None
     print(f"{result.report.verdict} ({result.report.termination_reason}); outputs in {args.out}")
+    return 0
+
+
+# eval
+
+
+def run_count(value: str) -> int:
+    """argparse type for ``--runs``: an integer from 1 to 10 (Req 26.8, 28.5)."""
+    try:
+        runs = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"must be an integer from 1 to 10, got {value!r}") from None
+    if not 1 <= runs <= 10:
+        raise argparse.ArgumentTypeError(f"must be an integer from 1 to 10, got {runs}")
+    return runs
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    from .datagen.catalogue import ScenarioSpecError, load_catalogue
+    from .evaluation.runner import EvalPlan, EvaluationRunner
+    from .models.vocab import SystemName
+
+    config = _load_config(args.config)
+    snapshot_root, answer_key_root = config.paths.snapshot_root, config.paths.answer_key_root
+    check_roots(snapshot_root, answer_key_root)
+    if _inside(args.out, snapshot_root):
+        raise CliError(f"--out {args.out} must not be inside the snapshot root {snapshot_root}")
+    try:
+        catalogue = [spec.name for spec in load_catalogue(args.scenarios)]
+    except ScenarioSpecError as exc:
+        raise CliError(str(exc)) from None
+    if not catalogue:
+        raise CliError(f"--scenarios {args.scenarios} holds no scenario specs")
+    selected = list(dict.fromkeys(args.scenario)) if args.scenario else catalogue
+    unknown = [name for name in selected if name not in catalogue]
+    if unknown:
+        raise CliError(f"--scenario: {', '.join(unknown)} not in the scenario catalogue {args.scenarios}")
+    _require_api_key(config)
+    clock = SystemClock()
+    try:
+        build_llm_client(config.llm, clock, os.environ)  # fail before any Run if the provider is unavailable
+    except ProviderUnavailable as exc:
+        raise CliError(str(exc)) from None
+
+    redactor = SecretRedactor.from_env()
+    systems = (SystemName(args.system),) if args.system else (SystemName.MULTI, SystemName.BASELINE)
+    plan = EvalPlan(scenarios=tuple(selected), systems=systems, runs=args.runs)
+
+    def progress(score) -> None:
+        state = "failed" if score.failed else f"top1={score.top1}"
+        print(f"{score.scenario} {score.system} run-{score.run_index}: {state}")
+
+    runner = EvaluationRunner(
+        config,
+        client_factory=lambda: build_llm_client(config.llm, clock, os.environ),
+        clock=clock,
+        redactor=redactor,
+        eval_command=shlex.join(["incident-investigator", *args.argv]),
+        progress=progress,
+    )
+    table = asyncio.run(runner.run(plan, args.out))
+    failed = sum(1 for r in table.runs if r.failed)
+    print(f"{len(table.runs)} runs ({failed} failed); results in {args.out}")
     return 0
 
 
@@ -151,11 +217,22 @@ def build_parser() -> argparse.ArgumentParser:
     inv.add_argument("--config", type=Path, required=True)
     inv.add_argument("--out", type=Path, required=True)
     inv.set_defaults(handler=cmd_investigate)
+
+    ev = sub.add_parser("eval", help="run both systems over the scenario catalogue and write the results table")
+    ev.add_argument("--config", type=Path, required=True)
+    ev.add_argument("--out", type=Path, required=True)
+    ev.add_argument("--scenario", action="append", default=None, metavar="NAME", help="repeat to select several")
+    ev.add_argument("--system", choices=("multi", "baseline"), default=None)
+    ev.add_argument("--runs", type=run_count, default=3, help="runs per scenario and system, 1 to 10 (default 3)")
+    ev.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS, help="the scenario catalogue directory")
+    ev.set_defaults(handler=cmd_eval)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
+    args.argv = argv
     redactor = SecretRedactor.from_env()
     try:
         return args.handler(args)

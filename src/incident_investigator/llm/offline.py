@@ -70,6 +70,7 @@ class OfflineResponder(RecordingMixin):
             CallKind.REASONING: self._reasoning,
             CallKind.CRITIC: self._critic,
             CallKind.REPORTING: self._reporting,
+            CallKind.BASELINE_STEP: self._baseline_step,
         }.get(kind)
         if handler is None:
             raise ValueError(f"OfflineResponder has no rule for call kind {kind}")
@@ -309,3 +310,100 @@ class OfflineResponder(RecordingMixin):
                     }
                 )
         return {"summary_claims": [], "recommended_actions": actions[: ctx.get("max_actions", 6)]}
+
+    # baseline: a fixed probe sequence, then a final answer from the reasoning heuristic (design D4)
+
+    @staticmethod
+    def _baseline_probes(ctx: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        incident = ctx["incident"]
+        affected = incident["affected_service"]
+        start = _dt(incident["start_time"])
+        windows = ctx.get("suggested_windows", {})
+        telemetry = windows.get("telemetry") or {
+            "start": (start - timedelta(hours=1)).isoformat(),
+            "end": (start + timedelta(hours=2)).isoformat(),
+        }
+        changes = windows.get("changes") or {"start": (start - timedelta(days=7)).isoformat(), "end": start.isoformat()}
+        symptom = (incident.get("symptoms") or [incident["title"]])[0][:200]
+        return [
+            ("query_logs", {"service": affected, "time_range": telemetry, "levels": ["warn", "error"], "limit": OFFLINE_LIMIT}),
+            (
+                "query_metrics",
+                {
+                    "service": affected,
+                    "metric_name": "error_rate",
+                    "time_range": telemetry,
+                    "step_seconds": 600,
+                    "limit": OFFLINE_LIMIT,
+                },
+            ),
+            ("get_deployments", {"service": affected, "time_range": changes, "limit": OFFLINE_LIMIT}),
+            ("get_dependencies", {"service": affected, "depth": 5, "limit": OFFLINE_LIMIT}),
+            ("search_incidents", {"query": symptom, "limit": OFFLINE_LIMIT}),
+        ]
+
+    def _baseline_step(self, ctx: dict[str, Any]) -> dict[str, Any]:
+        history = ctx.get("history", [])
+        probes = self._baseline_probes(ctx)
+        if len(history) < len(probes):
+            tool, params = probes[len(history)]
+            return {"reasoning_note": f"Probe {tool} for the affected service.", "tool_request": {"tool": tool, "params": params}}
+        return {"reasoning_note": "The probe sequence is complete.", "final_answer": self._baseline_final(ctx)}
+
+    def _baseline_final(self, ctx: dict[str, Any]) -> dict[str, Any]:
+        evidence = []
+        for step in ctx.get("history", []):
+            obs = step["observation"]
+            if not obs.get("evidence_id"):
+                continue
+            evidence.append(
+                {
+                    "evidence_id": obs["evidence_id"],
+                    "tool": obs["tool"],
+                    "query": obs.get("query") or {},
+                    "reliability": "partial" if obs.get("partial") else "stale" if obs.get("stale") else "complete",
+                    "historical": obs["tool"] == "search_incidents",
+                    "observation": obs.get("summary", {}),
+                }
+            )
+        reasoning = self._reasoning({**ctx, "evidence": evidence})
+        hypotheses = [{**h, "hypothesis_id": f"H{h['rank']}"} for h in reasoning["hypotheses"]]
+        info = {e["evidence_id"]: e for e in evidence}
+
+        def complete_support(h: dict[str, Any]) -> list[str]:
+            return [
+                e
+                for e in h["supporting_evidence_ids"]
+                if info.get(e, {}).get("reliability") == "complete" and not info[e]["historical"]
+            ]
+
+        conclusive = bool(hypotheses) and bool(complete_support(hypotheses[0]))
+        actions = []
+        for h in hypotheses:
+            support = complete_support(h)
+            cause = h["cause_type"].replace("_", " ")
+            if h["rank"] == 1 and conclusive:
+                actions.append(
+                    {
+                        "text": f"Mitigate {cause} on {h['component']} and confirm recovery.",
+                        "category": "mitigation",
+                        "hypothesis_id": h["hypothesis_id"],
+                        "evidence_ids": support,
+                    }
+                )
+            else:
+                actions.append(
+                    {
+                        "text": f"Collect more evidence on {cause} for {h['component']}.",
+                        "category": "further_investigation",
+                        "hypothesis_id": h["hypothesis_id"],
+                        "evidence_ids": [],
+                    }
+                )
+        return {
+            "outcome": "conclusive" if conclusive else "inconclusive",
+            "hypotheses": hypotheses,
+            "claim_statuses": reasoning["claim_statuses"],
+            "claims": [],
+            "recommended_actions": actions[: ctx.get("max_actions", 6)],
+        }
