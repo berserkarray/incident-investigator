@@ -49,7 +49,7 @@ Each worktree has its own `.venv` with an editable install of that worktree (`py
     - `models/tasks.py`, `critic.py`, `gaps.py`, `budget.py`: `Task`, `TaskBrief`, `TaskGraphState`, `EvidenceRequest` with status, `DataGap` with `dedupe_key()`, `TokenCount`, `BudgetLimits`, `BudgetUsage`.
     - `models/blackboard.py`: `BlackboardState`, `TerminationRecord`.
     - `models/report.py`: `InvestigationReport` with every Req 20.1 section, `ReportHypothesis`, `MissingEvidenceEntry`, `RecommendedAction`.
-    - `models/trace.py`: discriminated `TraceEvent` union (`task_transition`, `tool_call`, `tool_rejected`, `llm_call`, `citation_violation`, `duplicate_discarded`, `plan_fallback`, `critic_decision`, `termination`, `config`, `budget_final`), `RunTrace`.
+    - `models/trace.py`: discriminated `TraceEvent` union (`task_transition`, `tool_call`, `tool_rejected`, `llm_call`, `citation_violation`, `duplicate_discarded`, `default_graph_fallback`, `critic_decision`, `termination`, `config`, `budget_final`), `RunTrace`.
     - _Requirements: 3.1, 16.2, 17.1, 18.1, 20.1, 20.2, 29.3, 29.4, 29.5, 29.6_
   - [x] 1.6 Write the scenario, answer-key and results models
     - `models/scenario.py`: `ScenarioSpec` (8–15 services, 2–24 h window, 7–30 day lookback), `Trap`, `RedHerring`, `FaultTemplateName`, `CatalogueCondition`, `NoiseConstraints`.
@@ -240,7 +240,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - _Requirements: 1.6, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
   - [x] 6.5 Write the TaskGraph and planner
     - `orchestrator/graph.py`: `add`, `ready` (insertion order), `transition` with only the allowed edges, `validate_plan` (cycles, self-loops, duplicates, dangling deps, wrong structure), `default()`.
-    - `orchestrator/planner.py`: one `plan` LLM call; on a plan defect or a failed call, use the Default_Task_Graph and record a `plan_fallback` trace event with the cause.
+    - `orchestrator/planner.py`: one `plan` LLM call; on a plan defect or a failed call, use the Default_Task_Graph and record a `default_graph_fallback` trace event with the cause.
     - _Requirements: 6.1, 6.3, 6.4, 6.7, 6.8, 6.9_
   - [x] 6.6 Write the Scheduler
     - `orchestrator/scheduler.py`: event-driven `_pump()` on graph creation, task add and task terminal; starts Ready_Tasks while running < concurrency limit; Reporting gated on loop end; each attempt runs under `clock.wait_for(per_task_timeout_s)`; one retry on Agent_Failure in the running state; second failure → failed + Data_Gap; a failure never cancels other running Tasks; every transition traced.
@@ -417,15 +417,23 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
 ### Phase 4: Integration (`main`)
 
 - [ ] 10. Integrate, then write the documentation
-  - [ ] 10.1 Merge the workstreams
+  - [x] 10.1 Merge the workstreams
     - Merge order: `ws/tools-data` → `ws/orchestrator-state` → `ws/agents` → `ws/eval-baseline` → `ws/tests`. Before each merge, rebase the branch on `main` and run its tests; after each merge, run the full suite on `main`. Fix failures on the branch, not on `main`.
     - _Requirements: 30.1_
-  - [ ] 10.2 Run the full suite
+  - [x] 10.2 Run the full suite
     - `pytest` on `main` with no API key and no network: green, under 120 s. Record the wall time.
     - _Requirements: 30.1, 30.5_
-  - [ ] 10.3 Run an offline CLI smoke test
+  - [x] 10.3 Run an offline CLI smoke test
     - `generate --seed 42`, then `investigate` with `config.fake.toml` for both systems on all 12 snapshots. Check every Run writes the four output files and exits 0.
     - _Requirements: 28.1, 28.2, 28.3_
+  - Integration notes (10.1–10.3 done; 10.4–10.7 remain):
+    - Merge order `ws/orchestrator-state` → `ws/tools-data` → `ws/agents` → `ws/eval-baseline` → `ws/tests`, each with `--no-ff` and the full suite after it.
+    - Both systems build their Tool_Layer with `build_tool_layer()`. The Investigator passes `_DeferredToolSignal`; the Baseline_Agent checks the Tool_Call Budget before every step, so the parity test ignores the termination hook.
+    - Hypothesis IDs and the sufficiency flag are assigned once, by `agents/reasoning.assign_hypothesis_ids()`, called from `InvestigatorRun._commit_reasoning()`.
+    - The Planner calls `agents/planner.request_plan()` (prompt and repairable content rules) and keeps `TaskGraph.validate_plan()` and the Default_Task_Graph fallback.
+    - One Support_Check, `state/support.py`. Its free-text rule also requires CURRENT, as D2's "Historical_Evidence supports only past-incident claims" demands.
+    - The OfflineResponder's `baseline_step` starts from the Baseline prompt's `suggested_windows`, the same windows the Specialists' opening requests use.
+    - The Results_Table JSON keeps exact means and Spreads (Property 62); the Markdown prints 4 decimals.
   - [ ] 10.4 Write the README
     - Setup (Python 3.11+, install command, `OPENAI_API_KEY`, every config field with its default, example `generate`, `investigate`, `eval` and `pytest` commands); Architecture (the design Mermaid component diagram and an explanation of coordination: Blackboard, Task_Graph, parallel dispatch, Critic feedback loop, budgets and every Termination_Reason); External Dependencies (OpenAI key, no key for tests or the fake provider, every pinned package and version); Deliverables index (transcript, both Results_Tables, scenarios, tests, `TECHNICAL_NOTE.md`, `ASSUMPTIONS.md`); Incomplete Functionality (task 10.6).
     - State that `provider = "fake"` results are smoke results that do not measure real accuracy.
