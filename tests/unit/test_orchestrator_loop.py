@@ -6,7 +6,9 @@ import json
 import pytest
 from scripted_run import (
     CRI,
+    DEP,
     OBS,
+    OPENING_REQUESTS,
     REA,
     REP,
     WINDOW,
@@ -15,6 +17,7 @@ from scripted_run import (
     deployments_request,
     entries,
     logs_request,
+    no_findings,
     reasoning_reply,
     requests_reply,
     run_scripted,
@@ -185,7 +188,7 @@ async def test_requests_in_the_last_round_end_with_max_critic_rounds(tmp_path):
 
 
 async def test_no_hypotheses_cancels_the_critic_without_a_call(tmp_path):
-    script = [*entries(OBS, CallKind.SPECIALIST_FINDINGS, '{"claims": []}'), *entries(REA, None, "{}", n=4)]
+    script = [*entries(OBS, None, no_findings), *entries(DEP, None, no_findings), *entries(REA, None, "{}", n=4)]
     run = await run_scripted(tmp_path, script + entries(REP, CallKind.REPORTING, '{"recommended_actions": []}'))
     assert_reason(run, TerminationReason.NO_HYPOTHESES)
     assert ("T4", "pending", "cancelled") in run.transitions()
@@ -203,11 +206,13 @@ async def test_critic_failure_after_retry_ends_with_critic_failed(tmp_path):
 
 
 async def test_tool_call_budget_exhaustion(tmp_path):
+    # The budget covers the four code-issued opening requests (logs and metrics; deployments and
+    # dependencies), so the Critic's request in round 1 is the first one refused.
     critic = entries(CRI, CallKind.CRITIC, requests_reply(logs_request()))
-    run = await run_scripted(tmp_path, base_script(critic=critic), budgets={"tool_calls": 1})
+    run = await run_scripted(tmp_path, base_script(critic=critic), budgets={"tool_calls": OPENING_REQUESTS})
     assert_reason(run, TerminationReason.TOOL_CALL_BUDGET_EXHAUSTED)
-    assert run.report.budget_usage.tool_calls.used == 1
-    assert len(run.events("tool_call")) == 1
+    assert run.report.budget_usage.tool_calls.used == OPENING_REQUESTS
+    assert len(run.events("tool_call")) == OPENING_REQUESTS
     reasons = [g.reason for g in run.report.data_gaps]
     assert reasons == ["budget_exhausted", "unfulfilled_evidence_request:ER1.1:tool_call_budget_exhausted"]
     assert ("T6", "running", "cancelled") in run.transitions() and ("T7", "pending", "cancelled") in run.transitions()
@@ -219,7 +224,8 @@ async def test_tool_call_budget_exhaustion(tmp_path):
 
 async def test_token_budget_below_the_reserve_goes_to_the_deterministic_report(tmp_path):
     script = [
-        *entries(OBS, CallKind.SPECIALIST_FINDINGS, '{"claims": []}', usage=usage(10)),
+        *entries(OBS, None, no_findings, usage=usage(10)),
+        *entries(DEP, None, no_findings, usage=usage(0)),
         *entries(REA, CallKind.REASONING, reasoning_reply, usage=usage(9500)),
         *entries(REP, CallKind.REPORTING, '{"recommended_actions": []}'),
     ]
@@ -233,7 +239,8 @@ async def test_token_budget_below_the_reserve_goes_to_the_deterministic_report(t
 
 async def test_reporting_runs_when_the_reserve_is_left(tmp_path):
     script = [
-        *entries(OBS, CallKind.SPECIALIST_FINDINGS, '{"claims": []}', usage=usage(0)),
+        *entries(OBS, None, no_findings, usage=usage(0)),
+        *entries(DEP, None, no_findings, usage=usage(0)),
         *entries(REA, CallKind.REASONING, reasoning_reply, usage=usage(9000)),
         *entries(REP, CallKind.REPORTING, '{"recommended_actions": []}', usage=usage(1000)),
     ]

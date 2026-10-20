@@ -282,34 +282,34 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - The trace event for a plan fallback is `default_graph_fallback` (the existing model), not `plan_fallback`.
     - `FakeClock` now advances only when no other callback is ready to run, so per-Task timeouts and the watchdog never fire while work is still runnable.
 
-- [ ] 7. Workstream `ws/agents`: agents, prompts and the OpenAI adapter
-  - [ ] 7.1 Write the prompt templates and builders
+- [x] 7. Workstream `ws/agents`: agents, prompts and the OpenAI adapter
+  - [x] 7.1 Write the prompt templates and builders
     - `agents/prompts/`: one constant Prompt_Template per agent plus a builder that renders run-time content and one `<context>` JSON block, per the design prompt table.
     - Reasoning and Critic builders include each Evidence_Item's ID, Tool, canonical query, reliability and Observation_Summary, and never retained records.
     - Observability, Dependency and Baseline templates tell the model to set `limit` ≤ 25 and use the Tool's filters on every request.
     - No scenario names, template names or answer-specific Components in any template.
     - _Requirements: 10.7, 11.15, 24.8_
-  - [ ] 7.2 Complete the Observability_Agent
+  - [x] 7.2 Complete the Observability_Agent
     - Code-issued opening requests (`query_logs` with `limit=25`; `query_metrics(error_rate, step_seconds=600, limit=25)`); for Evidence_Request Tasks, the suggested Tool and params first; then the `specialist_step` loop until the step limit or findings; every Tool_Request counts as one step; error Observations go back to the loop and never raise; step schema `tool` is a `Literal` of the agent's own Tools; context validators for claim shape (one service, one signal, onset or no-onset, ≥ 1 Evidence_ID).
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 17.8_
-  - [ ] 7.3 Complete the Dependency_Agent
+  - [x] 7.3 Complete the Dependency_Agent
     - Give it `get_deployments`, `get_dependencies` and `search_incidents`. Code-issued opening requests (`get_deployments(affected, [start − change_lookback, start), all change types, limit=25)`; `get_dependencies(affected, depth=5, limit=25)`); suggested request first for Evidence_Request Tasks; same step loop; context validators for finding type, event time and the historical rule.
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8_
-  - [ ] 7.4 Complete the Reasoning_Agent
+  - [x] 7.4 Complete the Reasoning_Agent
     - Context validators: 2–5 Hypotheses, unique Root_Cause_Labels, Components in the dependency map, ranks 1..N with non-increasing confidence, no ID in both lists, a status for every claim.
     - After citation validation, code assigns Hypothesis IDs by label (reuse or new) and forces `evidence_sufficient = false` without `complete`, non-historical support.
     - _Requirements: 1.5, 10.1, 10.2, 10.3, 10.5, 10.6, 10.8, 10.9_
-  - [ ] 7.5 Complete the Critic_Agent
+  - [x] 7.5 Complete the Critic_Agent
     - Context validators: exactly one of acceptance or 1..max requests; acceptance names the rank-1 ID; target/Tool fit; params parse into the Tool input model; acceptance rejected when rank-1 support is historical-only or only `partial`/`stale`; a `historical_only_support` or `low_reliability_support` request is required in those cases.
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.16, 11.17_
-  - [ ] 7.6 Complete the Reporting_Agent and planner prompt
+  - [x] 7.6 Complete the Reporting_Agent and planner prompt
     - Reporting context validators: each action names one Blackboard Hypothesis, one category, ≥ 1 Evidence_ID unless `further_investigation`, at most the configured maximum. The report keeps the Orchestrator's Verdict and Termination_Reason unchanged.
     - Planner prompt and `PlanOutput` context rules.
     - _Requirements: 6.1, 12.1, 12.2, 12.3, 12.4, 12.5, 19.7_
-  - [ ] 7.7 Complete the OfflineResponder
+  - [x] 7.7 Complete the OfflineResponder
     - All design D4 rules for `plan`, `specialist_step`, `reasoning` (generic Component scoring and keyword cause table), `critic` (Req 11.6 and 11.17 rules first), `reporting` and `baseline_step` (fixed probe sequence, then a final answer). Every emitted Tool request uses `limit` ≤ 25. It reads only the `<context>` block and imports nothing from `datagen` or `evaluation`.
     - _Requirements: 5.11, 24.8_
-  - [ ] 7.8 Write the OpenAI adapter and the retrying client
+  - [x] 7.8 Write the OpenAI adapter and the retrying client
     - `llm/openai.py`: `AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=0)`; JSON output mode; map `usage.prompt_tokens` / `completion_tokens` to `TokenCount`; map SDK errors to `LLMErrorCategory` with redacted messages.
     - Before writing it, check the current OpenAI docs for `gpt-5.4-mini`: whether it accepts `temperature`, whether it needs `max_completion_tokens` instead of `max_tokens`, and whether Chat Completions or the Responses API is the right endpoint. Record the choice in a code comment and the README.
     - `llm/retrying.py`: `RetryingLLMClient` (retry `RATE_LIMIT`, `SERVER`, `TIMEOUT`; per-attempt `clock.wait_for`; doubling delay capped).
@@ -329,7 +329,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 24: Specialist, Reporting and Baseline output validation.** **Validates: Requirements 8.3, 9.3, 9.4, 12.1, 12.4, 25.7**
     - **Property 25: Reasoning and Critic prompts carry summaries, not records.** **Validates: Requirements 10.7, 11.15**
     - **Property 26: Hypothesis identity and sufficiency are code-enforced.** **Validates: Requirements 10.8, 10.9**
-  - [ ] 7.11 Branch checkpoint: tests green on `ws/agents`, rebased on `main`.
+  - [x] 7.11 Branch checkpoint: tests green on `ws/agents`, rebased on `main`.
 
 - [ ] 8. Workstream `ws/eval-baseline`: baseline, Evaluator and `cli eval`
   - [ ] 8.1 Write the ReAct Baseline_Agent

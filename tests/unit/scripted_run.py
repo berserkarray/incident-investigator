@@ -44,7 +44,10 @@ def entries(caller, kind, respond: Callable[[LLMRequest], str] | str, n: int = 1
     return [ScriptEntry(caller, kind, **{key: respond}, **extra) for _ in range(n)]
 
 
-def no_findings(_: LLMRequest) -> str:
+def no_findings(request: LLMRequest) -> str:
+    """Empty findings, as a ``specialist_step`` answer or as the final ``specialist_findings`` answer."""
+    if request.call_kind is CallKind.SPECIALIST_STEP:
+        return json.dumps({"reasoning": "Nothing further to query.", "findings": {"claims": []}})
     return json.dumps({"claims": []})
 
 
@@ -123,9 +126,10 @@ def usage(n: int) -> TokenCount:
 def base_script(*, critic: Sequence[ScriptEntry] = (), reasoning_rounds: int = 1, reporting: bool = True) -> list[ScriptEntry]:
     """Findings for every Observability Task, Reasoning per round, the given Critic entries, Reporting."""
     script = [
-        *entries(OBS, CallKind.SPECIALIST_FINDINGS, no_findings, n=4),
-        # With the dependency tools in place, Dependency Tasks cite evidence and ask for findings too.
-        *entries(DEP, CallKind.SPECIALIST_FINDINGS, no_findings, n=4),
+        # Specialists run code-issued requests, then a specialist_step loop (ws/agents); each step here
+        # returns empty findings at once. call_kind=None serves both step and final-findings calls.
+        *entries(OBS, None, no_findings, n=4),
+        *entries(DEP, None, no_findings, n=4),
         *entries(REA, CallKind.REASONING, reasoning_reply, n=reasoning_rounds),
         *critic,
     ]
@@ -185,3 +189,8 @@ async def run_scripted(tmp_path: Path, script: Sequence[ScriptEntry], **config_s
     )
     assert len(sink.outputs) == 1, "every Run writes exactly one report"
     return ScriptedRun(result=result, fake=fake, sink=sink, clock=clock)
+
+
+OPENING_REQUESTS = 4
+"""Code-issued Tool_Requests of the first Specialist Tasks: query_logs and query_metrics (Observability),
+get_deployments and get_dependencies (Dependency) (Req 8.2, 9.2, 9.6)."""
