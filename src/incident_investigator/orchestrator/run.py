@@ -15,7 +15,7 @@ from ..agents.base import Agent, AgentContext, AgentOutcome
 from ..agents.critic import CriticAgent
 from ..agents.dependency import DependencyAgent
 from ..agents.observability import ObservabilityAgent
-from ..agents.reasoning import ReasoningAgent
+from ..agents.reasoning import ReasoningAgent, assign_hypothesis_ids
 from ..agents.reporting import ReportingAgent
 from ..errors import BudgetBlocked, RunClosed
 from ..llm.gateway import LLMGateway
@@ -23,7 +23,7 @@ from ..llm.validator import StructuredOutputFailure
 from ..models.claims import LabelledClaim
 from ..models.critic import EvidenceRequest, EvidenceRequestStatus
 from ..models.gaps import DataGapDraft
-from ..models.outputs import CriticOutput, HypothesisDraft, ReasoningOutput, ReportingOutput
+from ..models.outputs import CriticOutput, ReasoningOutput, ReportingOutput
 from ..models.report import InvestigationReport, RecommendedAction
 from ..models.run import RunInputs, RunResult
 from ..models.tasks import Task
@@ -194,13 +194,6 @@ class InvestigatorRun:
             ]
         )
 
-    def _hypothesis_id_for(self, draft: HypothesisDraft) -> str:
-        for hypothesis_id in self.board.all_hypothesis_ids():
-            latest = self.board.hypothesis_history(hypothesis_id)[-1]
-            if latest.label == draft.label:
-                return hypothesis_id
-        return self.board.next_hypothesis_id()
-
     async def _commit_reasoning(self, outcome: AgentOutcome) -> None:
         output: ReasoningOutput = outcome.output  # type: ignore[assignment]
         prior = {c.claim_id: c for c in self.board.claims()}
@@ -213,12 +206,7 @@ class InvestigatorRun:
             outcome.agent,
         )
         self._trace_violations(result.violations)
-        pairs = []
-        for draft in result.output.hypotheses:
-            sufficient = draft.evidence_sufficient and any(
-                ledger.is_complete_current(e) for e in draft.supporting_evidence_ids
-            )
-            pairs.append((self._hypothesis_id_for(draft), draft.model_copy(update={"evidence_sufficient": sufficient})))
+        pairs = assign_hypothesis_ids(result.output.hypotheses, self.board, ledger, self.board.next_hypothesis_id)
         await self.board.add_hypothesis_revisions(outcome.task_id, pairs)
         await self.board.set_claims(apply_claim_updates(prior, result.output.claim_updates))
 

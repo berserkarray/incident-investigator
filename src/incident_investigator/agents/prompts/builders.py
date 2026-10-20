@@ -1,20 +1,68 @@
 """Prompt builders: run-time content plus one ``<context>`` JSON block per prompt (design D5).
 
-Reasoning and Critic prompts carry Observation_Summaries, never full records (Req 10.7, 11.15).
+Each builder pairs with one Prompt_Template in ``templates.py``. The ``<context>`` block is the only
+part of a prompt the OfflineResponder reads, so everything an answer depends on goes into it.
+
+Reasoning and Critic prompts carry each Evidence_Item's ID, Tool, canonical query, reliability and
+Observation_Summary, never retained records (Req 10.7, 11.15). Specialist and Baseline prompts carry
+the records of their own Observations, up to each request's record limit (Req 25.10).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from ...llm.context import render_context
 from ...models.critic import EvidenceRequest
-from ...models.evidence import EvidenceItem, Observation
+from ...models.evidence import EvidenceItem, LedgerView, Observation
 from ...models.hypothesis import HypothesisRevision
 from ...models.incident import IncidentClaim, IncidentReport
 from ...models.report import ReportHypothesis
 from ...models.tools import TOOL_INPUT_MODELS
-from ...models.vocab import CauseType, ConcernCategory, SPECIALIST_TOOLS, ToolName
+from ...models.vocab import (
+    SPECIALIST_TOOLS,
+    ActionCategory,
+    AgentName,
+    CauseType,
+    ChangeType,
+    ConcernCategory,
+    FindingType,
+    LogLevel,
+    MetricName,
+    ToolName,
+)
 from ...state.ports import BlackboardReader
+
+MAX_HYPOTHESES = 5
+
+TOOL_VOCABULARIES: dict[ToolName, dict[str, list[str]]] = {
+    ToolName.QUERY_LOGS: {"levels": [v.value for v in LogLevel]},
+    ToolName.QUERY_METRICS: {"metric_name": [v.value for v in MetricName]},
+    ToolName.GET_DEPLOYMENTS: {"change_types": [v.value for v in ChangeType]},
+    ToolName.GET_DEPENDENCIES: {},
+    ToolName.SEARCH_INCIDENTS: {},
+}
+"""Closed vocabularies a Tool's input accepts, shown next to its schema."""
+
+DAG_RULES = (
+    "1 to max_initial_tasks observability tasks and 1 to max_initial_tasks dependency tasks, each with no dependencies",
+    "exactly one reasoning task whose depends_on lists every specialist task",
+    "exactly one critic task whose depends_on is the reasoning task only",
+    "exactly one reporting task with no dependencies; it runs after the investigation loop ends",
+    "no other tasks, no cycles, unique task_id values, and depends_on names only task_ids in the plan",
+)
+
+CRITIC_RULES = (
+    "Accept only the rank-1 hypothesis, by its hypothesis_id, and only when no evidence request is filed.",
+    "Do not accept when the rank-1 hypothesis has no supporting evidence besides search_incidents evidence; "
+    "file a historical_only_support request for it instead.",
+    "Do not accept when every current supporting evidence item of the rank-1 hypothesis is partial or stale; "
+    "file a low_reliability_support request for it instead.",
+    "suggested_tool must belong to the target agent and suggested_params must be valid input for that tool.",
+)
+
+
+# entries
 
 
 def incident_entry(report: IncidentReport) -> dict[str, Any]:
@@ -22,6 +70,7 @@ def incident_entry(report: IncidentReport) -> dict[str, Any]:
 
 
 def evidence_entry(item: EvidenceItem) -> dict[str, Any]:
+    """ID, Tool, canonical query, reliability and Observation_Summary of one Evidence_Item. No records."""
     return {
         "evidence_id": item.evidence_id,
         "tool": item.tool.value,
@@ -32,7 +81,18 @@ def evidence_entry(item: EvidenceItem) -> dict[str, Any]:
     }
 
 
+def brief_evidence_entry(item: EvidenceItem) -> dict[str, Any]:
+    """ID, Tool and summary only: other agents' evidence shown to a Specialist."""
+    return {
+        "evidence_id": item.evidence_id,
+        "tool": item.tool.value,
+        "reliability": item.reliability.value,
+        "summary": item.observation.model_dump(mode="json", exclude_defaults=True),
+    }
+
+
 def observation_entry(obs: Observation) -> dict[str, Any]:
+    """An Observation as the caller received it: summary, records up to the limit, error and flags."""
     return {
         "evidence_id": obs.evidence_id,
         "tool": str(obs.tool),
@@ -84,6 +144,22 @@ def tool_schemas(tools: Sequence[ToolName]) -> dict[str, Any]:
     return {t.value: TOOL_INPUT_MODELS[t].model_json_schema() for t in sorted(tools)}
 
 
+def tool_vocabularies(tools: Sequence[ToolName]) -> dict[str, Any]:
+    return {t.value: TOOL_VOCABULARIES[t] for t in sorted(tools) if TOOL_VOCABULARIES[t]}
+
+
+def support_profile(h: HypothesisRevision, ledger: LedgerView) -> dict[str, Any]:
+    """How the supporting citations of one Hypothesis split by reliability (inputs of Req 11.5, 11.6, 11.16)."""
+    cited = [e for e in h.supporting_evidence_ids if ledger.has(e)]
+    current = [e for e in cited if not ledger.is_historical(e)]
+    return {
+        "hypothesis_id": h.hypothesis_id,
+        "complete_current": [e for e in current if ledger.is_complete_current(e)],
+        "partial_or_stale_current": [e for e in current if not ledger.is_complete_current(e)],
+        "historical": [e for e in cited if ledger.is_historical(e)],
+    }
+
+
 def _board_common(board: BlackboardReader) -> dict[str, Any]:
     return {
         "evidence": [evidence_entry(e) for e in board.evidence()],
@@ -92,6 +168,27 @@ def _board_common(board: BlackboardReader) -> dict[str, Any]:
         "evidence_requests": [request_entry(r) for r in board.evidence_requests()],
         "findings": [f.model_dump(mode="json") for f in board.findings()],
     }
+
+
+# builders
+
+
+def plan_prompt(
+    incident: IncidentReport,
+    components: Sequence[str],
+    *,
+    max_initial_tasks: int,
+) -> str:
+    context = {
+        "role": "planner",
+        "incident": incident_entry(incident),
+        "components": sorted(components),
+        "agents": [a.value for a in AgentName if a is not AgentName.ORCHESTRATOR],
+        "specialist_tools": {agent.value: sorted(t.value for t in tools) for agent, tools in SPECIALIST_TOOLS.items()},
+        "max_initial_tasks": max_initial_tasks,
+        "dag_rules": list(DAG_RULES),
+    }
+    return "Plan the initial investigation tasks for this incident.\n\n" + render_context(context)
 
 
 def specialist_prompt(
@@ -103,20 +200,34 @@ def specialist_prompt(
     observations: Sequence[Observation],
     tools: Sequence[ToolName],
     steps_remaining: int,
+    notes: Sequence[str] = (),
+    other_evidence: Sequence[EvidenceItem] = (),
+    extra_vocabularies: Mapping[str, Sequence[str]] | None = None,
+    final: bool = False,
 ) -> str:
     context = {
         "role": role,
         "incident": incident_entry(incident),
         "components": sorted(components),
         "task": task,
-        "observations": [observation_entry(o) for o in observations],
         "tools": tool_schemas(tools),
+        "vocabularies": {**tool_vocabularies(tools), **{k: list(v) for k, v in (extra_vocabularies or {}).items()}},
+        "observations": [observation_entry(o) for o in observations],
+        "step_notes": list(notes),
+        "other_evidence": [brief_evidence_entry(e) for e in other_evidence],
         "steps_remaining": steps_remaining,
     }
-    return (
-        f"Investigate as the {role} agent. Your task and your tool observations so far are in the context. "
-        "Report findings that cite the evidence_id of each observation you rely on.\n\n" + render_context(context)
-    )
+    if final:
+        instruction = (
+            f"Investigate as the {role} agent. The step limit of this task is reached: return only your findings "
+            "for the observations in the context, citing the evidence_id of each observation you rely on."
+        )
+    else:
+        instruction = (
+            f"Investigate as the {role} agent. Your task and your tool observations so far are in the context. "
+            "Request one more tool or return your findings, citing the evidence_id of each observation you rely on."
+        )
+    return f"{instruction}\n\n{render_context(context)}"
 
 
 def reasoning_prompt(board: BlackboardReader, incident: IncidentReport, components: Sequence[str]) -> str:
@@ -126,7 +237,7 @@ def reasoning_prompt(board: BlackboardReader, incident: IncidentReport, componen
         "components": sorted(components),
         "cause_types": [c.value for c in CauseType],
         "latest_hypotheses": [hypothesis_entry(h) for h in board.active_hypotheses()],
-        "max_hypotheses": 5,
+        "max_hypotheses": MAX_HYPOTHESES,
         **_board_common(board),
     }
     return (
@@ -144,16 +255,21 @@ def critic_prompt(
     round_budget: int,
     max_requests: int,
 ) -> str:
+    active = board.active_hypotheses()
+    ledger = board.ledger_view()
     context = {
         "role": "critic",
         "incident": incident_entry(incident),
         "components": sorted(components),
-        "hypotheses": [hypothesis_entry(h) for h in board.active_hypotheses()],
+        "hypotheses": [hypothesis_entry(h) for h in active],
+        "top_hypothesis_support": support_profile(active[0], ledger) if active else None,
         "critic_round": critic_round,
         "critic_round_budget": round_budget,
         "max_requests": max_requests,
         "concern_categories": [c.value for c in ConcernCategory],
+        "rules": list(CRITIC_RULES),
         "specialist_tools": {agent.value: sorted(t.value for t in tools) for agent, tools in SPECIALIST_TOOLS.items()},
+        "tools": tool_schemas(list(ToolName)),
         **_board_common(board),
     }
     return "Review the top-ranked hypothesis and either accept it or request targeted evidence.\n\n" + render_context(
@@ -184,6 +300,53 @@ def reporting_prompt(
         "data_gaps": [g.model_dump(mode="json") for g in board.data_gaps()],
         "missing_evidence": list(missing_evidence),
         "max_actions": max_actions,
-        "action_categories": ["mitigation", "fix", "prevention", "further_investigation"],
+        "action_categories": [c.value for c in ActionCategory],
     }
     return "Write the remediation recommendations for the final report.\n\n" + render_context(context)
+
+
+@dataclass(frozen=True)
+class BaselineTurn:
+    """One completed Baseline_Agent step: its note, its Tool_Request and the Observation it returned."""
+
+    step: int
+    note: str
+    tool: str
+    params: Mapping[str, Any]
+    observation: Observation
+
+
+def baseline_prompt(
+    *,
+    incident: IncidentReport,
+    components: Sequence[str],
+    claims: Sequence[IncidentClaim],
+    history: Sequence[BaselineTurn],
+    step: int,
+) -> str:
+    tools = list(ToolName)
+    context = {
+        "role": "baseline",
+        "incident": incident_entry(incident),
+        "components": sorted(components),
+        "claims": [claim_entry(c) for c in claims],
+        "cause_types": [c.value for c in CauseType],
+        "finding_types": [f.value for f in FindingType],
+        "action_categories": [c.value for c in ActionCategory],
+        "max_hypotheses": MAX_HYPOTHESES,
+        "tools": tool_schemas(tools),
+        "vocabularies": tool_vocabularies(tools),
+        "history": [
+            {
+                "step": turn.step,
+                "reasoning_note": turn.note,
+                "tool_request": {"tool": turn.tool, "params": dict(turn.params)},
+                "observation": observation_entry(turn.observation),
+            }
+            for turn in history
+        ],
+        "step": step,
+    }
+    return (
+        "Investigate the incident. Request one tool or give your final answer.\n\n" + render_context(context)
+    )
