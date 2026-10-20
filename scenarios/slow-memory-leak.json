@@ -1,0 +1,25 @@
+{
+  "name": "slow-memory-leak",
+  "description": "A deployment three days before the window leaks memory in an upstream service, which is killed and restarted repeatedly. A harmless config change on the affected service lands 20 minutes before onset.",
+  "service_count": 12,
+  "telemetry_window_hours": 6,
+  "change_lookback_days": 10,
+  "symptom_onset_offset_minutes": 300,
+  "fault": {
+    "template": "memory_leak",
+    "root_role": "upstream",
+    "cause_type": "memory_leak",
+    "params": {"change_days_before_window": 3, "restart_cycle_minutes": 25, "oom_kills": 3}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "innocent_config_change", "target_role": "affected", "offset_minutes": -20}],
+    "decoy_cause_type": "config_error"
+  },
+  "report": {
+    "title": "Intermittent errors on {affected}",
+    "symptoms": ["Bursts of HTTP 5xx on {affected}", "p99 latency on {affected} rising over several hours"],
+    "severity": "sev3",
+    "start_delay_minutes": 4
+  },
+  "conditions": ["slow_leak_old_change"]
+}

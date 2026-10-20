@@ -54,18 +54,18 @@ def background_logs(ctx: GenContext) -> list[ProvisionalLog]:
     return logs
 
 
-def _excluded_after_onset(ctx: GenContext, constraints: NoiseConstraints, protected: set[str], service: str, minute: float) -> bool:
-    return constraints.no_error_logs_on_root_after_onset and service in protected and minute >= ctx.onset_minute
+def noise_logs(ctx: GenContext, clean_after_onset: set[str]) -> list[ProvisionalLog]:
+    """Coincidental ERROR logs and noisy alerts scattered over the window.
 
-
-def noise_logs(ctx: GenContext, constraints: NoiseConstraints, protected: set[str]) -> list[ProvisionalLog]:
-    """Coincidental ERROR logs and noisy alerts scattered over the window."""
+    Components in ``clean_after_onset`` get no noise ERROR log at or after onset
+    (``NoiseConstraints.no_error_logs_on_root_after_onset``).
+    """
     rng = ctx.rng("noise-logs")
     services = [c.name for c in ctx.topology.components if c.kind in (ComponentKind.SERVICE, ComponentKind.LOAD_BALANCER)]
     logs: list[ProvisionalLog] = []
     while len([l for l in logs if l.level is LogLevel.ERROR]) < ctx.spec.noise.error_logs:
         service, minute = rng.choice(services), rng.uniform(0, ctx.minutes - 1)
-        if _excluded_after_onset(ctx, constraints, protected, service, minute):
+        if service in clean_after_onset and minute >= ctx.onset_minute:
             continue
         logs.append(
             ctx.log("noise", minute, service, LogLevel.ERROR, rng.choice(NOISE_ERRORS).format(ms=rng.randint(100, 9000)))
@@ -87,7 +87,11 @@ def noise_logs(ctx: GenContext, constraints: NoiseConstraints, protected: set[st
 
 
 def noise_changes(ctx: GenContext, constraints: NoiseConstraints, no_deploy: set[str]) -> list[ProvisionalChange]:
-    """Coincidental changes: at least one before the window; respects the template's constraints."""
+    """Coincidental changes: at least one before the window.
+
+    With ``no_changes_in_window`` every change lands before the window; Components in ``no_deploy``
+    get configuration changes instead of deployments (``no_deploys_on_path_to_root``).
+    """
     rng = ctx.rng("noise-changes")
     names = ctx.topology.names()
     lookback_minutes = (ctx.window_start - ctx.lookback_start).total_seconds() / 60

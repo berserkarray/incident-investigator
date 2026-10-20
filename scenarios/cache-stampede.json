@@ -1,0 +1,27 @@
+{
+  "name": "cache-stampede",
+  "description": "Cache keys that share one TTL expire together and the misses pile onto the database. A coincidental burst of traffic peaks just after onset.",
+  "service_count": 10,
+  "telemetry_window_hours": 3,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 100,
+  "fault": {
+    "template": "cache_stampede",
+    "root_role": "cache",
+    "cause_type": "cache_stampede",
+    "params": {"expiry_lead_minutes": 1}
+  },
+  "trap": {
+    "red_herrings": [
+      {"kind": "traffic_spike", "target_role": "affected", "offset_minutes": 1, "params": {"factor": 6.5, "minutes": 4}}
+    ],
+    "decoy_cause_type": "traffic_attack"
+  },
+  "report": {
+    "title": "Slow responses and errors on {affected}",
+    "symptoms": ["p99 latency on {affected} above 1 s", "Request volume on {affected} surged"],
+    "severity": "sev2",
+    "start_delay_minutes": 3
+  },
+  "conditions": ["cache_stampede_peak"]
+}

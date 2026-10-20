@@ -1,0 +1,25 @@
+{
+  "name": "expired-tls-certificate",
+  "description": "The serving certificate of an upstream service expires at onset. No deployment touched it or the path to it; coincidental network alerts fire around onset.",
+  "service_count": 9,
+  "telemetry_window_hours": 4,
+  "change_lookback_days": 14,
+  "symptom_onset_offset_minutes": 180,
+  "fault": {
+    "template": "certificate_expiry",
+    "root_role": "upstream",
+    "cause_type": "certificate_expiry",
+    "params": {"warning_lead_minutes": 120}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "noisy_alerts", "offset_minutes": 2, "params": {"count": 5, "spread_minutes": 20}}],
+    "decoy_cause_type": "network_partition"
+  },
+  "report": {
+    "title": "Requests failing on {affected}",
+    "symptoms": ["HTTP 5xx rate on {affected} above 40%", "Errors on {affected} began abruptly"],
+    "severity": "sev1",
+    "start_delay_minutes": 2
+  },
+  "conditions": ["tls_no_path_deploys"]
+}

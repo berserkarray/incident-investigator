@@ -1,0 +1,22 @@
+{
+  "name": "feature-flag-rollout",
+  "description": "A feature flag enabled for one cohort breaks price calculation for that cohort only; other requests to the same service keep succeeding.",
+  "service_count": 10,
+  "telemetry_window_hours": 4,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 160,
+  "fault": {
+    "template": "feature_flag_regression",
+    "root_role": "affected",
+    "cause_type": "feature_flag_regression",
+    "params": {"flag": "pricing-engine-v2", "cohort": "beta-eu", "lead_minutes": 10}
+  },
+  "trap": null,
+  "report": {
+    "title": "Checkout errors for some users on {affected}",
+    "symptoms": ["HTTP 5xx rate on {affected} above 5%", "Errors reported by users in one region only"],
+    "severity": "sev3",
+    "start_delay_minutes": 5
+  },
+  "conditions": ["flag_cohort_errors"]
+}

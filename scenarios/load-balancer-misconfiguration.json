@@ -1,0 +1,25 @@
+{
+  "name": "load-balancer-misconfiguration",
+  "description": "The entry load balancer health-checks the affected pool on the wrong port and stops routing to it, while the service's own probe stays healthy.",
+  "service_count": 8,
+  "telemetry_window_hours": 3,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 95,
+  "fault": {
+    "template": "lb_misconfiguration",
+    "root_role": "entry_lb",
+    "cause_type": "load_balancer_misconfiguration",
+    "params": {"change_lead_minutes": 8}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "disagreeing_monitors", "target_role": "affected", "offset_minutes": 0, "params": {"minutes": 20}}],
+    "decoy_cause_type": "network_partition"
+  },
+  "report": {
+    "title": "{affected} unreachable for users",
+    "symptoms": ["HTTP 503 rate for {affected} above 50%", "{affected} reported healthy by internal monitoring"],
+    "severity": "sev1",
+    "start_delay_minutes": 2
+  },
+  "conditions": ["lb_disagreeing_monitors"]
+}

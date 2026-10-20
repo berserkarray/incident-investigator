@@ -1,0 +1,25 @@
+{
+  "name": "insufficient-evidence",
+  "description": "The affected service shows errors and latency with nothing in the snapshot that explains them. A deployment on an unrelated peer service lands 5 minutes before onset.",
+  "service_count": 8,
+  "telemetry_window_hours": 2.5,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 90,
+  "fault": {
+    "template": "symptoms_only",
+    "root_role": null,
+    "cause_type": null,
+    "params": {}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "unrelated_deploy_near_onset", "target_role": "peer", "offset_minutes": -5}],
+    "decoy_cause_type": "deploy_regression"
+  },
+  "report": {
+    "title": "Elevated errors on {affected}",
+    "symptoms": ["HTTP 5xx rate on {affected} above 10%"],
+    "severity": "sev3",
+    "start_delay_minutes": 3
+  },
+  "conditions": ["insufficient_evidence"]
+}

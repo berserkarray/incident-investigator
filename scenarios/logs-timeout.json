@@ -1,0 +1,23 @@
+{
+  "name": "logs-timeout",
+  "description": "The primary database reaches its connection limit. query_logs times out on every call, so the cause must be found from metrics, changes and the dependency map.",
+  "service_count": 9,
+  "telemetry_window_hours": 3,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 120,
+  "fault": {
+    "template": "connection_pool_exhaustion",
+    "root_role": "primary_db",
+    "cause_type": "connection_pool_exhaustion",
+    "params": {"max_connections": 500, "ramp_minutes": 15}
+  },
+  "trap": null,
+  "failure_profile": {"forced": [{"tool": "query_logs", "failure_type": "timeout"}]},
+  "report": {
+    "title": "Slow requests on {affected}",
+    "symptoms": ["p99 latency on {affected} above 2 s", "HTTP 5xx rate on {affected} above 30%"],
+    "severity": "sev2",
+    "start_delay_minutes": 3
+  },
+  "conditions": ["logs_timeout_gap"]
+}

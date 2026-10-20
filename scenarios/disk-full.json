@@ -1,0 +1,25 @@
+{
+  "name": "disk-full",
+  "description": "The primary database's data volume fills up and writes fail. A past incident on the affected service had the same symptoms and a different cause.",
+  "service_count": 11,
+  "telemetry_window_hours": 5,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 220,
+  "fault": {
+    "template": "disk_full",
+    "root_role": "primary_db",
+    "cause_type": "disk_full",
+    "params": {"fill_minutes": 150}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "lookalike_past_incident", "target_role": "affected", "params": {"days_before_window": 45}}],
+    "decoy_cause_type": "memory_leak"
+  },
+  "report": {
+    "title": "Order writes failing on {affected}",
+    "symptoms": ["HTTP 5xx rate on {affected} above 25%", "p99 latency on {affected} several times above normal"],
+    "severity": "sev2",
+    "start_delay_minutes": 4
+  },
+  "conditions": ["disk_full_lookalike"]
+}

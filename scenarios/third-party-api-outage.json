@@ -1,0 +1,25 @@
+{
+  "name": "third-party-api-outage",
+  "description": "An external API called by an upstream service starts returning 503s. Nothing changed in the window; coincidental network alerts fire around onset.",
+  "service_count": 11,
+  "telemetry_window_hours": 4,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 150,
+  "fault": {
+    "template": "third_party_outage",
+    "root_role": "third_party",
+    "cause_type": "third_party_outage",
+    "params": {"outage_minutes": 50}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "noisy_alerts", "offset_minutes": 0, "params": {"count": 6, "spread_minutes": 30}}],
+    "decoy_cause_type": "network_partition"
+  },
+  "report": {
+    "title": "Order failures on {affected}",
+    "symptoms": ["HTTP 502 responses from {affected} above 10%", "p99 latency on {affected} above 5 s"],
+    "severity": "sev2",
+    "start_delay_minutes": 5
+  },
+  "conditions": ["third_party_no_changes"]
+}
