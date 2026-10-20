@@ -12,20 +12,34 @@ class Severity(StrEnum):
 
 
 class CauseType(StrEnum):
+    """General incident cause taxonomy. It is broader than the synthetic dataset on purpose."""
+
+    # changes
     CONFIG_ERROR = "config_error"
     DEPLOY_REGRESSION = "deploy_regression"
-    DATABASE_FAILOVER = "database_failover"
-    THIRD_PARTY_OUTAGE = "third_party_outage"
-    MEMORY_LEAK = "memory_leak"
-    CERTIFICATE_EXPIRY = "certificate_expiry"
-    CACHE_STAMPEDE = "cache_stampede"
-    TRAFFIC_ATTACK = "traffic_attack"
-    LOAD_BALANCER_MISCONFIGURATION = "load_balancer_misconfiguration"
-    DISK_FULL = "disk_full"
-    CONNECTION_POOL_EXHAUSTION = "connection_pool_exhaustion"
     FEATURE_FLAG_REGRESSION = "feature_flag_regression"
+    CODE_DEFECT = "code_defect"
+    # data stores and caches
+    DATABASE_FAILOVER = "database_failover"
+    CONNECTION_POOL_EXHAUSTION = "connection_pool_exhaustion"
+    CACHE_STAMPEDE = "cache_stampede"
+    DATA_CORRUPTION = "data_corruption"
+    # resources and capacity
+    MEMORY_LEAK = "memory_leak"
+    DISK_FULL = "disk_full"
     RESOURCE_EXHAUSTION = "resource_exhaustion"
+    CAPACITY_LIMIT = "capacity_limit"
+    # network, edge and dependencies
+    LOAD_BALANCER_MISCONFIGURATION = "load_balancer_misconfiguration"
     NETWORK_PARTITION = "network_partition"
+    DNS_FAILURE = "dns_failure"
+    CERTIFICATE_EXPIRY = "certificate_expiry"
+    THIRD_PARTY_OUTAGE = "third_party_outage"
+    DEPENDENCY_TIMEOUT = "dependency_timeout"
+    RATE_LIMITING = "rate_limiting"
+    # traffic and time
+    TRAFFIC_ATTACK = "traffic_attack"
+    CLOCK_SKEW = "clock_skew"
 
 
 class ToolName(StrEnum):

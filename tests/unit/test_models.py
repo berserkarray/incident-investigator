@@ -277,7 +277,21 @@ def test_termination_reason_sets():
     assert len(INVESTIGATOR_REASONS) == 8 and len(BASELINE_REASONS) == 5
     assert TerminationReason.NO_HYPOTHESES.value == "no_hypotheses"
     assert TerminationReason.FINAL_ANSWER not in INVESTIGATOR_REASONS
-    assert CauseType.TRAFFIC_ATTACK in set(CauseType) and len(CauseType) == 14
+
+def test_cause_type_vocabulary_is_a_general_taxonomy():
+    values = {c.value for c in CauseType}
+    assert len(values) == 21
+    generic = {
+        "dns_failure",
+        "rate_limiting",
+        "code_defect",
+        "dependency_timeout",
+        "capacity_limit",
+        "data_corruption",
+        "clock_skew",
+    }
+    assert generic <= values
+    assert {"traffic_attack", "deploy_regression", "network_partition"} <= values
 
 
 def test_data_gap_dedupe_key_uses_source_and_query():

@@ -31,7 +31,7 @@ Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstre
     - _Requirements: 5.9, 31.8, 31.11_
   - [x] 1.2 Write the base model and closed vocabularies
     - `models/base.py`: `StrictModel` (frozen, `extra="forbid"`), `NonBlank(n)`, `TimeRange` (half-open, `start < end`), `JsonValue`, `canonical_json()`.
-    - `models/vocab.py`: `CauseType` (14 values, including `traffic_attack` and `deploy_regression`), `Severity` (sev1–4), `ToolName`, `LogLevel`, `MetricName`, `ChangeType`, `AgentName`, `Caller`, `TaskKind`, `TaskState`, `ConcernCategory` (including `historical_only_support` and `low_reliability_support`), `ActionCategory`, `Reliability`, `Verdict`, `TerminationReason` (Investigator and Baseline sets), `FindingType`, `ErrorCode`.
+    - `models/vocab.py`: `CauseType` (21 values: a general taxonomy including `traffic_attack`, `deploy_regression` and seven causes no scenario uses: `dns_failure`, `rate_limiting`, `code_defect`, `dependency_timeout`, `capacity_limit`, `data_corruption`, `clock_skew`), `Severity` (sev1–4), `ToolName`, `LogLevel`, `MetricName`, `ChangeType`, `AgentName`, `Caller`, `TaskKind`, `TaskState`, `ConcernCategory` (including `historical_only_support` and `low_reliability_support`), `ActionCategory`, `Reliability`, `Verdict`, `TerminationReason` (Investigator and Baseline sets), `FindingType`, `ErrorCode`.
     - _Requirements: 10.2, 11.2, 12.5, 13.2, 23.13_
   - [x] 1.3 Write the incident, snapshot and tool models
     - `models/incident.py`: `IncidentReport` with the Req 1.1 constraints, `IncidentClaim`, `ClaimStatusUpdate`.
@@ -194,7 +194,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - `generate` writes all 12 scenarios and stops at the first failure.
     - _Requirements: 22.2, 22.13, 22.17, 23.1–23.12, 23.14, 23.15, 23.16, 24.11, 28.1, 28.8_
   - [ ] 5.10 Write generator tests
-    - For seed 42, all 12 scenarios generate and pass their checks; two generations are byte-identical; the catalogue covers 12 distinct conditions; a broken spec is rejected with field names and writes nothing.
+    - For seed 42, all 12 scenarios generate and pass their checks; two generations are byte-identical; the catalogue covers 12 distinct conditions; a broken spec is rejected with field names and writes nothing; no Answer_Key uses `dns_failure`, `rate_limiting`, `code_defect`, `dependency_timeout`, `capacity_limit`, `data_corruption` or `clock_skew` (the taxonomy stays broader than the dataset).
     - _Requirements: 22.2, 22.6, 23.14, 23.16_
   - [ ]* 5.11 Property tests for the generator (lower priority)
     - **Property 37: Invalid Scenario_Specs and Failure_Profiles are rejected.** **Validates: Requirements 14.9, 22.2**

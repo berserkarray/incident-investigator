@@ -812,15 +812,20 @@ They are immutable, and updates use `model_copy(update=...)`. Timestamps are `Aw
 ```python
 class Severity(StrEnum): SEV1 = "sev1"; SEV2 = "sev2"; SEV3 = "sev3"; SEV4 = "sev4"
 
-class CauseType(StrEnum):
+class CauseType(StrEnum):   # a general incident taxonomy, deliberately broader than the dataset
     CONFIG_ERROR = "config_error"; DEPLOY_REGRESSION = "deploy_regression"
-    DATABASE_FAILOVER = "database_failover"; THIRD_PARTY_OUTAGE = "third_party_outage"
-    MEMORY_LEAK = "memory_leak"; CERTIFICATE_EXPIRY = "certificate_expiry"
-    CACHE_STAMPEDE = "cache_stampede"; TRAFFIC_ATTACK = "traffic_attack"
-    LOAD_BALANCER_MISCONFIGURATION = "load_balancer_misconfiguration"; DISK_FULL = "disk_full"
-    CONNECTION_POOL_EXHAUSTION = "connection_pool_exhaustion"
-    FEATURE_FLAG_REGRESSION = "feature_flag_regression"
-    RESOURCE_EXHAUSTION = "resource_exhaustion"; NETWORK_PARTITION = "network_partition"
+    FEATURE_FLAG_REGRESSION = "feature_flag_regression"; CODE_DEFECT = "code_defect"
+    DATABASE_FAILOVER = "database_failover"; CONNECTION_POOL_EXHAUSTION = "connection_pool_exhaustion"
+    CACHE_STAMPEDE = "cache_stampede"; DATA_CORRUPTION = "data_corruption"
+    MEMORY_LEAK = "memory_leak"; DISK_FULL = "disk_full"
+    RESOURCE_EXHAUSTION = "resource_exhaustion"; CAPACITY_LIMIT = "capacity_limit"
+    LOAD_BALANCER_MISCONFIGURATION = "load_balancer_misconfiguration"
+    NETWORK_PARTITION = "network_partition"; DNS_FAILURE = "dns_failure"
+    CERTIFICATE_EXPIRY = "certificate_expiry"; THIRD_PARTY_OUTAGE = "third_party_outage"
+    DEPENDENCY_TIMEOUT = "dependency_timeout"; RATE_LIMITING = "rate_limiting"
+    TRAFFIC_ATTACK = "traffic_attack"; CLOCK_SKEW = "clock_skew"
+# 21 values. dns_failure, rate_limiting, code_defect, dependency_timeout, capacity_limit,
+# data_corruption and clock_skew are used by no scenario, so the vocabulary does not mirror the dataset.
 
 class ToolName(StrEnum): QUERY_LOGS = "query_logs"; QUERY_METRICS = "query_metrics"
     GET_DEPLOYMENTS = "get_deployments"; GET_DEPENDENCIES = "get_dependencies"; SEARCH_INCIDENTS = "search_incidents"
