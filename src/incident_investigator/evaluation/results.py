@@ -1,7 +1,7 @@
 """Results_Table rendering: ``results.json`` and ``results.md`` with identical values (Req 26.5, 27.8, 31.6).
 
-Formatting: each cell is ``mean ± spread`` with both values printed to ``DECIMALS`` decimals, which is
-the precision they are stored with in the JSON; ``unavailable`` when every Run of the cell failed;
+Formatting: each cell is ``mean ± spread`` with both values printed to ``DECIMALS`` decimals (the JSON
+keeps the exact values, so a Markdown cell is the JSON value rounded); ``unavailable`` when every Run of the cell failed;
 ``n/a`` when the metric does not apply (no Key_Evidence, or an insufficient-evidence key for hit@3).
 """
 

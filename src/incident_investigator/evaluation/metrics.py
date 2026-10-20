@@ -22,7 +22,8 @@ from ..state.support import CitingStatement, HypothesisCitation, IncidentClaimCi
 
 ALL_ROW = "ALL"
 DECIMALS = 4
-"""Results_Table means and Spreads are rounded to this many decimals in both JSON and Markdown."""
+"""The Markdown Results_Table prints means and Spreads to this many decimals. The JSON keeps the exact
+``statistics.mean`` / ``statistics.stdev`` values (design Property 62)."""
 
 SYSTEM_ORDER: tuple[SystemName, ...] = (SystemName.MULTI, SystemName.BASELINE)
 
@@ -291,7 +292,7 @@ def metric_stat(scores: Sequence[RunScore], metric: MetricKey) -> MetricStat:
     if values:
         mean = statistics.mean(values)
         spread = statistics.stdev(values) if len(values) > 1 else 0.0
-        return MetricStat(mean=round(mean, DECIMALS), spread=round(spread, DECIMALS), n=len(values), status="ok")
+        return MetricStat(mean=mean, spread=spread, n=len(values), status="ok")
     if all(value_of(s) is None for s in scores):
         # hit@3 on an insufficient-evidence key, recall with no Key_Evidence (Req 27.11, 27.14)
         if metric in (MetricKey.RANKING_HIT_AT_3, MetricKey.KEY_EVIDENCE_RECALL):

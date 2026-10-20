@@ -85,7 +85,6 @@ async def test_agent_failure_gap_lowers_confidence_by_the_penalty(incident, tmp_
     assert f"Confidence: {rank1.confidence:.2f} (before data-gap penalty: {rank1.raw_confidence:.2f})" in markdown
 
 
-@pytest.mark.skip(reason="needs ws/tools-data")
 async def test_forced_tool_failure_is_listed_and_lowers_confidence(tmp_path):
     """Forced query_logs timeouts on every attempt: one Data_Gap (query_logs, timeout), listed and penalised."""
     snapshot = make_snapshot(failure_profile=FailureProfile(forced=(ForcedFailure(tool=ToolName.QUERY_LOGS, failure_type=FailureType.TIMEOUT),)))

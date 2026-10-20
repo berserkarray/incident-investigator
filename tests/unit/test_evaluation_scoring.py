@@ -362,9 +362,10 @@ def score(scenario="s1", system=SystemName.MULTI, index=1, *, failed=False, top1
 def test_failed_runs_count_in_accuracy_but_not_in_other_metrics():
     cell = [score(index=1, top1=1, tools=2, precision=1.0), score(index=2, failed=True, tools=99), score(index=3, top1=1, tools=4, precision=0.5)]
     top1 = metric_stat(cell, MetricKey.TOP1_ACCURACY)
-    assert top1.n == 3 and top1.mean == round(2 / 3, 4) and top1.spread == round(statistics.stdev([1, 0, 1]), 4)
+    # exact statistics in the JSON model (design Property 62); only the Markdown rounds
+    assert top1.n == 3 and top1.mean == pytest.approx(2 / 3) and top1.spread == pytest.approx(statistics.stdev([1, 0, 1]))
     tools = metric_stat(cell, MetricKey.TOOL_CALLS)
-    assert (tools.n, tools.mean, tools.spread) == (2, 3.0, round(statistics.stdev([2, 4]), 4))
+    assert (tools.n, tools.mean) == (2, 3.0) and tools.spread == pytest.approx(statistics.stdev([2, 4]))
     assert metric_stat(cell, MetricKey.CITATION_PRECISION).mean == 0.75
     assert metric_stat(cell, MetricKey.OVER_CONFIDENT_RATE).n == 2  # Req 27.17: over non-failed Runs
     single = metric_stat(cell[:1], MetricKey.TOOL_CALLS)

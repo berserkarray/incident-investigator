@@ -24,8 +24,6 @@ from incident_investigator.models.budget import TokenCount
 from incident_investigator.models.critic import EvidenceRequestStatus
 from incident_investigator.models.vocab import AgentName, TaskState, TerminationReason, Verdict
 
-NEEDS_ORCHESTRATOR = pytest.mark.skip(reason="needs ws/orchestrator-state")
-NEEDS_BASELINE = pytest.mark.skip(reason="needs ws/eval-baseline")
 
 
 @pytest.fixture
@@ -109,7 +107,6 @@ async def test_no_hypotheses(incident, tmp_path):
     assert outcome.ledger.budget.critic_rounds == 0
 
 
-@NEEDS_ORCHESTRATOR
 async def test_duplicate_requests_only(incident, tmp_path):
     same = request_evidence("observability", text="timeout")
     script = [*reasoning(3), ScriptEntry(AgentName.CRITIC, respond=same), ScriptEntry(AgentName.CRITIC, respond=same)]
@@ -124,7 +121,6 @@ async def test_duplicate_requests_only(incident, tmp_path):
     assert len(outcome.events("critic_decision")) == 2
 
 
-@NEEDS_ORCHESTRATOR
 async def test_tool_call_budget_exhausted(incident, tmp_path):
     outcome = await run_scripted("multi", incident, tmp_path / "out", budgets={"tool_calls": 1})
 
@@ -137,7 +133,6 @@ async def test_tool_call_budget_exhausted(incident, tmp_path):
     assert any(g.reason == "budget_exhausted" for g in report.data_gaps)
 
 
-@NEEDS_ORCHESTRATOR
 async def test_token_budget_exhausted(incident, tmp_path):
     tokens, reserve = 200_000, 20_000
     heavy = TokenCount(input_tokens=tokens - 10_000)
@@ -169,7 +164,6 @@ async def test_token_budget_exhausted(incident, tmp_path):
     assert report.built_by == "deterministic"
 
 
-@NEEDS_ORCHESTRATOR
 async def test_wall_clock_timeout(incident, tmp_path):
     timeout = 120
     script = [ScriptEntry(AgentName.REASONING, respond=reasoning_reply(), delay_s=10 * timeout)]
@@ -238,7 +232,6 @@ def baseline_final_step(incident, *, outcome: str = "conclusive", support: tuple
     return json.dumps({"reasoning_note": "The errors start right after the pool change.", "final_answer": answer})
 
 
-@NEEDS_BASELINE
 async def test_baseline_final_answer(incident, tmp_path):
     script = [ScriptEntry("baseline", text=baseline_tool_step(incident)), ScriptEntry("baseline", text=baseline_final_step(incident))]
     outcome = await run_scripted("baseline", incident, tmp_path / "out", script, fallback=False)
@@ -253,7 +246,6 @@ async def test_baseline_final_answer(incident, tmp_path):
     assert {str(p.caller) for p in outcome.prompts} == {"baseline"}  # no other Agent is invoked (Req 25.1)
 
 
-@NEEDS_BASELINE
 async def test_baseline_failed(incident, tmp_path):
     outcome = await run_scripted("baseline", incident, tmp_path / "out", invalid("baseline", 4), fallback=False)
 
@@ -264,7 +256,6 @@ async def test_baseline_failed(incident, tmp_path):
     assert all(c.status == "unverified" for c in report.claim_statuses)
 
 
-@NEEDS_BASELINE
 async def test_baseline_tool_call_budget_stop(incident, tmp_path):
     script = [ScriptEntry("baseline", text=baseline_tool_step(incident)) for _ in range(3)]
     outcome = await run_scripted("baseline", incident, tmp_path / "out", script, fallback=False, budgets={"tool_calls": 1})

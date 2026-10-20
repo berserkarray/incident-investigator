@@ -1,13 +1,13 @@
 """Evaluator scoring rules and aggregation (Req 26.9, 27.1-27.17; design "Evaluator", Properties 59-62).
 
-Written against the design interfaces in ``evaluation/metrics.py``::
+Written against ``evaluation/metrics.py``::
 
-    score_run(report, ledger, trace, key, support) -> RunScore        # pure; report None = failed Run
-    aggregate(scores) -> list[ResultsRow]                              # per scenario x system, plus "ALL"
+    score_run(run, report, ledger, trace, key, *, latency_s, support=None) -> RunScore   # pure
+    failed_run_score(run, key, error, *, latency_s) -> RunScore                         # a failed Run
+    aggregate(scores) -> list[ResultsRow]                                               # per scenario x system, plus "ALL"
 
-``score()`` and ``aggregate()`` below are the only call sites, so a signature that grows extra
-arguments at integration changes one line each. The Support_Check is stubbed: it passes only the
-Evidence_IDs it is given, so citation precision is checked independently of the D2 rule table.
+``score()`` and ``aggregate()`` below are the only call sites. Citation precision uses the real
+Support_Check of design D2 (``state/support.py``).
 """
 
 import statistics
@@ -16,6 +16,8 @@ import pytest
 from factories import at, make_incident_report, window
 
 from incident_investigator.clock import FakeClock
+from incident_investigator.evaluation import metrics
+from incident_investigator.evaluation.metrics import RunIdentity, failed_run_score, score_run
 from incident_investigator.models.answer_key import AnswerKey, ExpectedDataGap, RootCauseLabel
 from incident_investigator.models.budget import TokenCount
 from incident_investigator.models.evidence import ObservationSummary
@@ -43,9 +45,9 @@ from incident_investigator.models.vocab import (
     Verdict,
 )
 from incident_investigator.state.blackboard import Blackboard
+from incident_investigator.state.support import SupportCheck
 from incident_investigator.tracing import TraceRecorder
 
-pytestmark = pytest.mark.skip(reason="needs ws/eval-baseline")
 
 C, I = Verdict.CONCLUSIVE, Verdict.INCONCLUSIVE
 ROOT = "checkout-a1b"
@@ -55,26 +57,18 @@ CANARY = "CANARY-" + "0" * 48
 # Interfaces under test
 
 
-def score(report, ledger, trace, key, support=None) -> RunScore:
-    from incident_investigator.evaluation.metrics import score_run
+RUN = RunIdentity(scenario="scenario", system=SystemName.MULTI, run_index=1, seed=42)
 
-    return score_run(report, ledger, trace, key, support or SupportOnly({"E0001"}))
+
+def score(report, ledger, trace, key, support=None) -> RunScore:
+    """Score one Run; ``report=None`` is a failed Run."""
+    if report is None:
+        return failed_run_score(RUN, key, "the run failed", latency_s=0.0)
+    return score_run(RUN, report, ledger, trace, key, latency_s=0.0, support=support or SupportCheck())
 
 
 def aggregate(scores):
-    from incident_investigator.evaluation import metrics
-
     return metrics.aggregate(scores)
-
-
-class SupportOnly:
-    """Support_Check stub: an Evidence_Item supports any statement iff its ID is in ``ids``."""
-
-    def __init__(self, ids):
-        self.ids = frozenset(ids)
-
-    def supports(self, statement, evidence, records=()) -> bool:
-        return evidence.evidence_id in self.ids
 
 
 # Builders
@@ -296,7 +290,8 @@ def test_a_failed_run_against_the_insufficient_marker_is_still_incorrect():
 
 def test_citation_precision_is_supported_distinct_pairs_over_all_pairs(ledger, trace):
     # pairs: (F001, E0001) once despite the repeat, (H1, E0001), (H1, E0002), (H2, E0001), (H2, E0099) -> C = 5
-    # supported: E0001 only, E0002 fails the check, E0099 is not in the ledger -> V = 3
+    # supported (design D2): the free-text fact by E0001; H1 by E0001 (its logs) and E0002 (its changes);
+    # not H2 (x-1 is in neither Evidence_Item), and E0099 is not in the ledger -> V = 3
     facts = (FactEntry(claim_id="F001", producer=AgentName.OBSERVABILITY, text="errors", evidence_ids=("E0001", "E0001")),)
     hypotheses = (hyp(1, supporting=("E0001", "E0002")), hyp(2, "x-1", supporting=("E0001", "E0099")))
     result = score(make_report(C, hypotheses, facts=facts), ledger, trace, label_key())

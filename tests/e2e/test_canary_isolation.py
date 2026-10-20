@@ -13,9 +13,6 @@ from incident_investigator.llm.offline import OfflineResponder
 from incident_investigator.models.config import load_config
 
 SEED = 42
-AVAILABLE_ON_THIS_BRANCH = frozenset({"bad-config-deploy"})
-NEEDS_TOOLS_DATA = pytest.mark.skip(reason="needs ws/tools-data")
-NEEDS_BASELINE = pytest.mark.skip(reason="needs ws/eval-baseline")
 
 KEY_ROOT_AS_CONFIGURED = "answer_keys"
 CONFIG = f"""
@@ -32,12 +29,7 @@ answer_key_root = "{KEY_ROOT_AS_CONFIGURED}"
 def cases():
     for scenario in CATALOGUE:
         for system in ("multi", "baseline"):
-            marks = []
-            if scenario not in AVAILABLE_ON_THIS_BRANCH:
-                marks.append(NEEDS_TOOLS_DATA)
-            if system == "baseline":
-                marks.append(NEEDS_BASELINE)
-            yield pytest.param(scenario, system, marks=marks, id=f"{scenario}-{system}")
+            yield pytest.param(scenario, system, id=f"{scenario}-{system}")
 
 
 @pytest.mark.parametrize(("scenario", "system"), list(cases()))

@@ -75,7 +75,6 @@ async def test_round1_requests_run_concurrently_and_round2_accepts_the_revision(
     assert report.hypotheses[0].hypothesis_id == "H1" and report.hypotheses[0].revision == 2
 
 
-@pytest.mark.skip(reason="needs ws/orchestrator-state")
 async def test_duplicate_request_is_discarded_with_a_trace_event(incident, tmp_path):
     script = [
         *reasoning(3),
