@@ -369,28 +369,28 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - The Baseline_Agent has no Reporting_Agent, so its LLM gate stops at the full token Budget (no reserve). It keeps using today's `LLMGateway(client, usage, trace, limits, model)` signature.
     - `eval` takes `--scenarios DIR` (default `scenarios`), like `generate`, to locate the Scenario_Catalogue.
 
-- [ ] 9. Workstream `ws/tests`: cross-cutting tests
-  - [ ] 9.1 Write the scripted-run harness
+- [x] 9. Workstream `ws/tests`: cross-cutting tests
+  - [x] 9.1 Write the scripted-run harness
     - `tests/harness.py`: builds `RunDependencies` from a `ScriptedFakeLLM` script, a `FakeClock`, a generated or hand-built snapshot and a config override; runs either system into a temp sink; returns the report, trace, ledger and recorded prompts.
     - _Requirements: 30.1, 30.4, 30.5_
-  - [ ] 9.2 Write one Investigator Run per Termination_Reason
+  - [x] 9.2 Write one Investigator Run per Termination_Reason
     - `critic_accepted`, `max_critic_rounds`, `duplicate_requests_only`, `tool_call_budget_exhausted`, `token_budget_exhausted`, `wall_clock_timeout` (DRG, no LLM call after the timeout), `critic_failed`, `no_hypotheses`. Each asserts exactly one report and that the report and trace both carry the reason.
     - _Requirements: 11.12, 11.13, 16.3, 16.7, 18.5, 18.6, 18.7, 18.9, 30.6_
-  - [ ] 9.3 Write the Baseline Termination_Reason runs
+  - [x] 9.3 Write the Baseline Termination_Reason runs
     - `final_answer`, `baseline_failed`, and one budget or timeout stop. Same assertions as 9.2.
     - _Requirements: 25.4, 25.6, 25.9, 30.6_
-  - [ ] 9.4 Write the inconclusive-path and Verdict-rule tests
+  - [x] 9.4 Write the inconclusive-path and Verdict-rule tests
     - Direct tests of `investigator_verdict` and `baseline_verdict` over constructed states with exactly one condition unmet, including the four supporting-evidence variants (absent from the ledger, `partial`, `stale`, historical).
     - One end-to-end Investigator Run with no Hypotheses: inconclusive, ranked list empty, missing-evidence list present.
     - A Run with a forced Tool failure: the Data_Gap is listed and confidence is lowered by the penalty.
     - _Requirements: 16.4, 17.4, 17.6, 19.1, 19.2, 19.3, 19.5, 25.5, 30.7_
-  - [ ] 9.5 Write the Critic feedback and parallel-dispatch end-to-end tests
+  - [x] 9.5 Write the Critic feedback and parallel-dispatch end-to-end tests
     - A round-1 request for both Specialists runs both resulting Tasks concurrently, a new Reasoning revision follows, and round 2 accepts. A duplicate request is discarded with a trace event.
     - _Requirements: 7.4, 10.4, 11.7, 11.8, 11.9, 11.10, 11.11_
-  - [ ] 9.6 Write the canary isolation test across all 12 scenarios
+  - [x] 9.6 Write the canary isolation test across all 12 scenarios
     - For each catalogue scenario (seed 42), one Investigator Run and one Baseline Run with the OfflineResponder. Assert no canary (any case) and no Answer_Key_Root path in any recorded prompt, Observation, Blackboard or ledger state, the trace or either report. Assert the Snapshot_Root is unchanged.
     - _Requirements: 2.5, 24.6, 24.7, 30.8_
-  - [ ] 9.7 Write the static isolation checks
+  - [x] 9.7 Write the static isolation checks
     - AST import-boundary test (only `cli` imports `evaluation`; investigator packages import neither `datagen` nor `evaluation` nor answer-key or scenario models; the OfflineResponder imports neither).
     - Scan investigator string constants and prompt templates for scenario names and template names.
     - Basic path check: a snapshot path outside the Snapshot_Root is rejected without reading; overlapping roots are rejected by the CLI.
@@ -412,7 +412,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 49: Markdown sync.** **Validates: Requirements 21.8**
     - **Property 55: Path guard with symlinks.** **Validates: Requirements 24.3**
     - **Property 56: Root disjointness.** **Validates: Requirements 24.10**
-  - [ ] 9.10 Branch checkpoint: tests written; tests that need unmerged workstreams may fail on this branch until it is rebased after task 10.1. Do not merge before then.
+  - [x] 9.10 Branch checkpoint: tests written; tests that need unmerged workstreams may fail on this branch until it is rebased after task 10.1. Do not merge before then.
 
 ### Phase 4: Integration (`main`)
 
