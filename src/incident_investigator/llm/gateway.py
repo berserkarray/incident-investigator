@@ -46,13 +46,21 @@ class LLMGateway:
         self._model = model_name
         self._termination = termination
         self._closed = False
+        self._loop_ended = False
 
     def close(self) -> None:
+        """No further LLM call of any caller (wall-clock timeout, Req 18.5)."""
         self._closed = True
+
+    def end_loop(self) -> None:
+        """The feedback loop ended: only the Reporting_Agent may still call the model (Req 18.8)."""
+        self._loop_ended = True
 
     def _gate(self, caller: Caller) -> None:
         if self._closed:
             raise RunClosed("the Run has ended")
+        if self._loop_ended and caller != AgentName.REPORTING:
+            raise RunClosed("the feedback loop has ended")
         used = self._usage.usage.total_tokens
         if used >= self._limits.tokens:
             raise BudgetBlocked("token budget exhausted")

@@ -6,7 +6,7 @@ Compound writes run under one asyncio.Lock so concurrent writers never lose an u
 """
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import NoReturn
 
 from ..clock import Clock
@@ -25,6 +25,16 @@ from ..models.tasks import Task
 from ..models.tools import ToolInput, ToolRecord, record_source_ids
 from ..models.vocab import Caller, Reliability, TerminationReason, ToolName, Verdict
 from ..tracing import TraceRecorder
+
+
+def _numbered(ids: Iterable[str], prefix: str) -> list[int]:
+    """The numbers of IDs shaped ``<prefix><digits>`` (``H3`` -> 3); other IDs are ignored."""
+    numbers = []
+    for value in ids:
+        digits = value[len(prefix):]
+        if value.startswith(prefix) and digits.isdigit():
+            numbers.append(int(digits))
+    return numbers
 
 
 def initial_claims(report: IncidentReport) -> tuple[IncidentClaim, ...]:
@@ -159,8 +169,11 @@ class Blackboard:
             )
             return self._usage
 
+    # Budget counters. Each is one read-modify-write with no await inside, so it is atomic under
+    # asyncio and cannot interleave with ``add_usage`` (Req 3.8).
+
     def reserve_tool_call(self, limit: int) -> bool:
-        """Count one Tool_Call if fewer than ``limit`` were made. Synchronous, so atomic under asyncio."""
+        """Count one Tool_Call if fewer than ``limit`` were made."""
         if self._usage.tool_calls >= limit:
             return False
         self._usage = self._usage.model_copy(update={"tool_calls": self._usage.tool_calls + 1})
@@ -229,13 +242,24 @@ class Blackboard:
         async with self._lock:
             self._findings.extend(claims)
 
+    def put_task(self, task: Task) -> None:
+        """Record a Task's current state. A single assignment, so it is atomic without the lock;
+        the scheduler records transitions synchronously so no two can interleave."""
+        self._tasks[task.task_id] = task
+
     async def upsert_task(self, task: Task) -> None:
         async with self._lock:
-            self._tasks[task.task_id] = task
+            self.put_task(task)
+
+    def put_evidence_request(self, request: EvidenceRequest) -> None:
+        self._requests[request.request_id] = request
 
     async def upsert_evidence_request(self, request: EvidenceRequest) -> None:
         async with self._lock:
-            self._requests[request.request_id] = request
+            self.put_evidence_request(request)
+
+    def evidence_request(self, request_id: str) -> EvidenceRequest | None:
+        return self._requests.get(request_id)
 
     async def set_adjustments(self, adjustments: Sequence[ConfidenceAdjustment]) -> None:
         async with self._lock:
@@ -328,6 +352,33 @@ class Blackboard:
         return LedgerView(
             items={e.evidence_id: LedgerEntry(tool=e.tool, reliability=e.reliability) for e in self._evidence}
         )
+
+    @classmethod
+    def from_state(cls, state: BlackboardState, clock: Clock, trace: TraceRecorder | None = None) -> "Blackboard":
+        """Rebuild a Blackboard from its serialized state; ``to_state()`` of the result equals ``state`` (Req 3.10)."""
+        board = cls(state.run_id, state.incident_id, state.incident_report, clock, trace)
+        board._claims = {c.claim_id: c for c in state.claims}
+        board._evidence = list(state.evidence)
+        board._retained = {r.evidence_id: tuple(r.records) for r in state.retained}
+        for item in board._evidence:
+            for record in board._retained.get(item.evidence_id, ()):
+                for rid in record_source_ids(record):
+                    board._by_source_id.setdefault(rid, record)
+        board._hypotheses = {h: list(revisions) for h, revisions in state.hypotheses.items()}
+        board._active = tuple(state.active_hypothesis_ids)
+        board._last_reasoning_task_id = state.last_reasoning_task_id
+        board._adjustments = tuple(state.adjustments)
+        board._findings = list(state.findings)
+        board._tasks = {t.task_id: t for t in state.tasks}
+        board._requests = {r.request_id: r for r in state.evidence_requests}
+        board._gaps = list(state.data_gaps)
+        board._usage = state.budget
+        board._termination = state.termination
+        board._acceptance = state.critic_acceptance
+        board._verdict = state.verdict
+        board._next_hypothesis = 1 + max(_numbered(state.hypotheses, "H"), default=0)
+        board._next_claim = 1 + max(_numbered((f.claim_id for f in state.findings), "F"), default=0)
+        return board
 
     def to_state(self) -> BlackboardState:
         return BlackboardState(

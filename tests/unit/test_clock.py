@@ -47,6 +47,16 @@ async def test_wait_for_returns_result_before_deadline():
     assert await clock.wait_for(work(), timeout=5) == "done"
 
 
+async def test_time_does_not_advance_while_other_work_is_runnable():
+    clock = FakeClock()
+    timer = asyncio.ensure_future(clock.sleep(10))
+    for _ in range(200):  # far more loop turns than the driver's idle threshold
+        await asyncio.sleep(0)
+        assert clock.monotonic() == 0
+    await timer
+    assert clock.monotonic() == 10
+
+
 async def test_manual_advance_without_auto_mode():
     clock = FakeClock(auto_advance=False)
     task = asyncio.ensure_future(clock.sleep(10))

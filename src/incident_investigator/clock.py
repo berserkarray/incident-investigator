@@ -60,8 +60,10 @@ class FakeClock:
 
     ``advance(dt)`` moves time forward and wakes every sleeper whose deadline has passed.
     With ``auto_advance=True`` a driver task jumps to the next deadline once the event loop
-    has gone ``idle_turns`` turns without new sleeps being registered, so code that sleeps
-    or times out runs to completion without manual advancing.
+    has gone ``idle_turns`` turns without new sleeps being registered and with no other
+    callback ready to run, so code that sleeps or times out runs to completion without manual
+    advancing, and long-lived timers (per-Task timeouts, the watchdog) never fire while other
+    work is still runnable.
     """
 
     def __init__(self, start: datetime = DEFAULT_FAKE_START, *, auto_advance: bool = True, idle_turns: int = 20):
@@ -113,6 +115,8 @@ class FakeClock:
             timer.cancel()
             if not work.done():
                 work.cancel()
+            elif not work.cancelled():
+                work.exception()  # mark it retrieved when the caller was cancelled first
 
     # internals
 
@@ -132,6 +136,13 @@ class FakeClock:
         if self._auto_advance and (self._driver is None or self._driver.done()):
             self._driver = asyncio.get_running_loop().create_task(self._drive())
 
+    @staticmethod
+    def _loop_busy() -> bool:
+        """True when another callback is queued to run. ``_ready`` is CPython's run queue; loops
+        without it fall back to counting idle turns only."""
+        ready = getattr(asyncio.get_running_loop(), "_ready", None)
+        return bool(ready)
+
     async def _drive(self) -> None:
         idle = 0
         seen = self._activity
@@ -140,7 +151,7 @@ class FakeClock:
             if not self._sleepers:
                 return
             await asyncio.sleep(0)
-            if self._activity != seen:
+            if self._activity != seen or self._loop_busy():
                 seen = self._activity
                 idle = 0
                 continue

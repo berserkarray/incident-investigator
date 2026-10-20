@@ -1,15 +1,22 @@
-"""One Investigator Run: plan, dispatch, Critic feedback loop, loop end, Verdict and report.
+"""One Investigator Run: plan, dispatch, Critic feedback loop, loop end, Verdict and report (Req 6, 7, 11, 16-19).
 
-This is the thin-slice Orchestrator: the Default_Task_Graph, concurrent Specialist Tasks, one retry
-per failed Task attempt and the Critic loop up to the Critic_Round Budget. The event-driven
-scheduler, plan validation, de-duplication, budgets, per-Task timeouts and the wall-clock watchdog
-replace parts of it in the orchestrator workstream.
+Flow: load the snapshot, record the Incident_Report claims, plan (or fall back to the
+Default_Task_Graph), then let the Scheduler dispatch Ready_Tasks. Specialist, Reasoning and Critic
+outcomes are committed after citation validation. The TerminationArbiter records exactly one
+Termination_Reason; at that moment the loop stops synchronously (Tool_Layer closed, non-Reporting
+LLM calls refused, non-Reporting Tasks cancelled). The loop-end steps then run in design order:
+unfulfilled-request Data_Gaps, the usage snapshot, the Confidence_Policy once, the Verdict once, and
+the report path (Reporting_Agent with one retry, or the Deterministic_Report_Generator).
+
+A watchdog sleeps on the Injectable_Clock for the wall-clock timeout. If it fires before the report
+is built, the whole investigation is cancelled, every gate is closed, the remaining loop-end steps
+run without any await on a Tool or an LLM, and the Deterministic_Report_Generator builds the report.
 """
 
 import asyncio
-from dataclasses import dataclass
-
-from pydantic import ValidationError
+from collections.abc import Mapping
+from contextlib import suppress
+from typing import Any
 
 from ..agents.base import Agent, AgentContext, AgentOutcome
 from ..agents.critic import CriticAgent
@@ -17,25 +24,26 @@ from ..agents.dependency import DependencyAgent
 from ..agents.observability import ObservabilityAgent
 from ..agents.reasoning import ReasoningAgent
 from ..agents.reporting import ReportingAgent
-from ..errors import BudgetBlocked, RunClosed
+from ..clock import ClockTimeout
 from ..llm.gateway import LLMGateway
-from ..llm.validator import StructuredOutputFailure
+from ..models.base import JsonValue
 from ..models.claims import LabelledClaim
 from ..models.critic import EvidenceRequest, EvidenceRequestStatus
+from ..models.evidence import Observation
 from ..models.gaps import DataGapDraft
 from ..models.outputs import CriticOutput, HypothesisDraft, ReasoningOutput, ReportingOutput
 from ..models.report import InvestigationReport, RecommendedAction
 from ..models.run import RunInputs, RunResult
 from ..models.tasks import Task
-from ..models.tools import TOOL_INPUT_MODELS, input_time_range
+from ..models.tools import input_time_range
 from ..models.vocab import (
     SPECIALIST_TOOLS,
     AgentName,
-    FailureKind,
     SystemName,
     TaskKind,
     TaskState,
     TerminationReason,
+    ToolName,
 )
 from ..report.assembler import ReportAssembler, ranked_hypotheses
 from ..report.deterministic import DeterministicReportGenerator
@@ -46,10 +54,15 @@ from ..state.citations import CitableOutput, CitationValidator, apply_claim_upda
 from ..state.confidence import apply_confidence_policy
 from ..state.verdict import investigator_verdict
 from ..tools.layer import BoardToolBudget, ScopedToolPort, ToolLayer
+from ..tools.ports import ToolPort
 from ..tools.snapshot import PathGuard, SnapshotLoader
 from ..tools.summary import ObservationSummarizer
 from ..tracing import TraceRecorder
-from .graph import TaskFactory, default_task_graph
+from .critic_loop import CriticLoop
+from .graph import TaskFactory, TaskGraph
+from .planner import Planner
+from .scheduler import Scheduler
+from .termination import CheckPoint, TerminationArbiter
 
 AGENTS: dict[AgentName, Agent] = {
     AgentName.OBSERVABILITY: ObservabilityAgent(),
@@ -59,11 +72,32 @@ AGENTS: dict[AgentName, Agent] = {
     AgentName.REPORTING: ReportingAgent(),
 }
 
+SPECIALIST_KINDS = frozenset({TaskKind.INITIAL, TaskKind.EVIDENCE_REQUEST})
 
-@dataclass
-class _LoopEnd:
-    reason: TerminationReason
-    acceptance: str | None = None
+
+class _DeferredToolSignal:
+    """Given to the Tool_Layer: a budget_exhausted rejection raises the condition, and the check runs
+    once the Tool_Result has been returned (and its Data_Gap recorded), per design D13."""
+
+    def __init__(self, arbiter: TerminationArbiter):
+        self._arbiter = arbiter
+
+    def signal(self, reason: TerminationReason) -> None:
+        self._arbiter.signal(reason, point=CheckPoint.TOOL_RESULT, check=False)
+
+
+class _CheckedToolPort:
+    """A Specialist's Tool port that runs the termination check after every Tool_Result."""
+
+    def __init__(self, port: ToolPort, arbiter: TerminationArbiter):
+        self._port = port
+        self._arbiter = arbiter
+
+    async def request(self, task_id: str | None, tool: ToolName | str, params: Mapping[str, JsonValue]) -> Observation:
+        try:
+            return await self._port.request(task_id, tool, params)
+        finally:
+            self._arbiter.check(CheckPoint.TOOL_RESULT)
 
 
 class InvestigatorRun:
@@ -75,18 +109,30 @@ class InvestigatorRun:
         self.clock = deps.clock
         self.validator = CitationValidator()
         self.factory = TaskFactory()
-        self.tasks: dict[str, Task] = {}
-        self._first_task_seen: set[AgentName] = set()
+        self._agents_started: set[AgentName] = set()
+        self._first_task: dict[str, bool] = {}
+        self._pending_end: tuple[TerminationReason, str | None] | None = None
+        self._acceptance: str | None = None
+        self._reporting_outcome: AgentOutcome | None = None
+        self._gaps_recorded = False
+        self._confidence_applied = False
 
     # setup
 
     def _setup(self) -> None:
         loader = SnapshotLoader(PathGuard(self.config.snapshot_root))
-        self.snapshot = loader.load(self.inputs.snapshot_dir)
+        self.snapshot = loader.load(self.inputs.snapshot_dir)  # before any Tool_Call or LLM call (Req 2.2, 2.4)
         self.run_id = f"{self.snapshot.incident_id}-multi-{self.config.seed}"
         self.trace = TraceRecorder(self.run_id, SystemName.MULTI, self.clock, self.deps.redactor)
         self.board = Blackboard(self.run_id, self.snapshot.incident_id, self.inputs.incident_report, self.clock, self.trace)
         self.limits = self.config.budgets.limits()
+        self.arbiter = TerminationArbiter(
+            tokens_used=lambda: self.board.usage.total_tokens,
+            token_threshold=self.limits.tokens - self.limits.reporting_reserve,
+            elapsed=self._elapsed,
+            wall_clock_s=self.limits.wall_clock_s,
+            on_end=self._on_loop_end,
+        )
         self.layer = ToolLayer(
             snapshot=self.snapshot,
             ledger=self.board,
@@ -95,83 +141,93 @@ class InvestigatorRun:
             trace=self.trace,
             clock=self.clock,
             summarizer=ObservationSummarizer(self.config.report.observation_summary_size),
+            termination=_DeferredToolSignal(self.arbiter),
         )
-        self.gateway = LLMGateway(self.deps.llm_client, self.board, self.trace, self.limits, self.config.llm.model)
+        self.gateway = LLMGateway(
+            self.deps.llm_client, self.board, self.trace, self.limits, self.config.llm.model, termination=self.arbiter
+        )
+        self.scheduler = Scheduler(
+            TaskGraph(),
+            hooks=self,
+            board=self.board,
+            trace=self.trace,
+            clock=self.clock,
+            concurrency_limit=self.config.orchestrator.concurrency_limit,
+            per_task_timeout_s=self.config.orchestrator.per_task_timeout_s,
+            loop_ended=lambda: self.arbiter.ended,
+        )
+        self.critic_loop = CriticLoop(self.limits.critic_rounds, self.factory)
+        self.planner = Planner(self.gateway, self.trace, self.config.orchestrator.max_initial_tasks_per_specialist)
 
-    def _context(self, agent: AgentName) -> AgentContext:
-        first = agent not in self._first_task_seen
-        self._first_task_seen.add(agent)
-        port = ScopedToolPort(self.layer, agent, SPECIALIST_TOOLS[agent]) if agent in SPECIALIST_TOOLS else None
+    def _elapsed(self) -> float:
+        return self.clock.monotonic() - self._started
+
+    def _tick(self) -> None:
+        self.board.set_elapsed(self._elapsed())
+
+    @property
+    def graph(self) -> TaskGraph:
+        return self.scheduler.graph
+
+    # scheduler hooks
+
+    def agent_for(self, task: Task) -> Agent:
+        return AGENTS[task.agent]
+
+    def context_for(self, task: Task) -> AgentContext:
+        tools: ToolPort | None = None
+        if task.agent in SPECIALIST_TOOLS:
+            tools = _CheckedToolPort(ScopedToolPort(self.layer, task.agent, SPECIALIST_TOOLS[task.agent]), self.arbiter)
         return AgentContext(
             board=self.board,
             llm=self.gateway,
-            tools=port,
+            tools=tools,
             clock=self.clock,
             config=self.config,
             incident=self.inputs.incident_report,
             components=self.snapshot.component_names,
-            is_first_task=first,
+            is_first_task=self._first_task.get(task.task_id, False),
         )
 
-    # task bookkeeping
+    def admit(self, task: Task) -> bool:
+        # A Critic Task that becomes ready with no Hypotheses is cancelled without a Critic_Round (Req 16.7).
+        return not (task.kind is TaskKind.CRITIC and not self.board.active_hypotheses())
 
-    async def _add(self, task: Task) -> Task:
-        self.tasks[task.task_id] = task
-        await self.board.upsert_task(task)
-        return task
+    def on_rejected(self, task: Task) -> None:
+        if task.kind is TaskKind.CRITIC:
+            self.arbiter.signal(TerminationReason.NO_HYPOTHESES, point=CheckPoint.TASK_TERMINAL)
 
-    async def _transition(self, task_id: str, to: TaskState, attempt: int | None = None) -> Task:
-        task = self.tasks[task_id]
-        update = {"state": to} if attempt is None else {"state": to, "attempt": attempt}
-        new = task.model_copy(update=update)
-        self.tasks[task_id] = new
-        await self.board.upsert_task(new)
-        self.trace.record("task_transition", task_id=task_id, agent=task.agent, from_state=task.state, to_state=to)
-        return new
+    def on_start(self, task: Task) -> dict[str, Any]:
+        self._first_task[task.task_id] = task.agent not in self._agents_started
+        self._agents_started.add(task.agent)
+        if task.kind is TaskKind.CRITIC:
+            # The round counter moves at dispatch; a retried attempt stays in the same round (Req 16.1).
+            return {"critic_round": self.board.increment_critic_round()}
+        return {}
 
-    async def _run_task(self, task_id: str, *, after_verdict: bool = False) -> AgentOutcome | None:
-        await self._transition(task_id, TaskState.RUNNING, attempt=1)
-        return await self._execute(task_id, after_verdict=after_verdict)
+    async def on_success(self, task: Task, outcome: AgentOutcome) -> None:
+        if task.kind in SPECIALIST_KINDS:
+            await self._commit_findings(outcome)
+        elif task.kind is TaskKind.REASONING:
+            await self._commit_reasoning(outcome)
+        elif task.kind is TaskKind.CRITIC:
+            self._commit_critic(task, outcome)
+        elif task.kind is TaskKind.REPORTING:
+            self._reporting_outcome = outcome
 
-    async def _run_concurrently(self, task_ids: list[str]) -> list[AgentOutcome | None]:
-        """Set every ready Task to running before awaiting any of them (Req 7.1, 7.2, 7.4)."""
-        for task_id in task_ids:
-            await self._transition(task_id, TaskState.RUNNING, attempt=1)
-        return list(await asyncio.gather(*(self._execute(t) for t in task_ids)))
-
-    async def _execute(self, task_id: str, *, after_verdict: bool = False) -> AgentOutcome | None:
-        """Run a running Task's attempts: one retry on Agent_Failure (Req 16.1, 16.2)."""
-        task = self.tasks[task_id]
-        agent = AGENTS[task.agent]
-        context = self._context(task.agent)
-        for attempt in (1, 2):
-            if attempt == 2:
-                self.tasks[task_id] = self.tasks[task_id].model_copy(update={"attempt": 2})
-            try:
-                outcome = await agent.run(self.tasks[task_id], context)
-            except (RunClosed, BudgetBlocked):
-                await self._transition(task_id, TaskState.CANCELLED)
-                return None
-            except Exception as exc:  # an Agent_Failure: exception or structured-output failure
-                kind = FailureKind.STRUCTURED_OUTPUT if isinstance(exc, StructuredOutputFailure) else FailureKind.EXCEPTION
-                self.trace.record(
-                    "agent_failure",
-                    agent=task.agent,
-                    task_id=task_id,
-                    attempt=attempt,
-                    failure_kind=kind,
-                    message=f"{type(exc).__name__}: {exc}"[:2000],
-                )
-                if attempt == 2:
-                    await self._transition(task_id, TaskState.FAILED)
-                    await self.board.add_gap(
-                        DataGapDraft(source=task.agent, task_id=task_id, reason=kind.value, after_verdict=after_verdict)
-                    )
-                    return None
-                continue
-            await self._transition(task_id, TaskState.COMPLETED)
-            return outcome
-        return None
+    async def after_terminal(self, task: Task) -> None:
+        if task.evidence_request_id is not None and task.state in (TaskState.COMPLETED, TaskState.FAILED):
+            request = self.board.evidence_request(task.evidence_request_id)
+            if request is not None:
+                status = EvidenceRequestStatus.COMPLETED if task.state is TaskState.COMPLETED else EvidenceRequestStatus.FAILED
+                self.board.put_evidence_request(request.model_copy(update={"status": status}))
+        if task.kind is TaskKind.CRITIC:
+            if task.state is TaskState.FAILED:
+                self.arbiter.signal(TerminationReason.CRITIC_FAILED, point=CheckPoint.TASK_TERMINAL)
+            elif task.state is TaskState.COMPLETED and self._pending_end is not None:
+                reason, self._acceptance = self._pending_end
+                self.arbiter.signal(reason, point=CheckPoint.CRITIC_DECISION)
+        self.arbiter.check(CheckPoint.TASK_TERMINAL)
 
     # commits (after citation validation)
 
@@ -195,6 +251,7 @@ class InvestigatorRun:
         )
 
     def _hypothesis_id_for(self, draft: HypothesisDraft) -> str:
+        """The ID of the Blackboard Hypothesis with the same Root_Cause_Label, else a new one (Req 10.8)."""
         for hypothesis_id in self.board.all_hypothesis_ids():
             latest = self.board.hypothesis_history(hypothesis_id)[-1]
             if latest.label == draft.label:
@@ -215,6 +272,7 @@ class InvestigatorRun:
         self._trace_violations(result.violations)
         pairs = []
         for draft in result.output.hypotheses:
+            # Req 10.9: sufficiency needs complete, non-historical support, whatever the model said.
             sufficient = draft.evidence_sufficient and any(
                 ledger.is_complete_current(e) for e in draft.supporting_evidence_ids
             )
@@ -222,199 +280,138 @@ class InvestigatorRun:
         await self.board.add_hypothesis_revisions(outcome.task_id, pairs)
         await self.board.set_claims(apply_claim_updates(prior, result.output.claim_updates))
 
+    def _completed_request_tasks(self) -> list[tuple[str, EvidenceRequest]]:
+        pairs = []
+        for task in self.graph:
+            if task.kind is TaskKind.EVIDENCE_REQUEST and task.state is TaskState.COMPLETED and task.evidence_request_id:
+                request = self.board.evidence_request(task.evidence_request_id)
+                if request is not None:
+                    pairs.append((task.task_id, request))
+        return pairs
+
+    def _commit_critic(self, task: Task, outcome: AgentOutcome) -> None:
+        output: CriticOutput = outcome.output  # type: ignore[assignment]
+        # Raises StructuredOutputFailure for unparseable parameters, which fails this attempt.
+        action = self.critic_loop.on_critic_completed(task, output, self._completed_request_tasks())
+        for request in action.requests:
+            self.board.put_evidence_request(request)
+        self.trace.record(
+            "critic_decision",
+            critic_round=action.critic_round,
+            accepted_hypothesis_id=action.acceptance,
+            evidence_requests=action.requests,
+        )
+        for duplicate in action.duplicates:
+            self.trace.record(
+                "duplicate_discarded",
+                request=duplicate.request,
+                matched_task_id=duplicate.matched_task_id,
+                matched_request_id=duplicate.matched_request_id,
+            )
+        for new_task in action.tasks:
+            # Each add pumps, so the round's Specialist Tasks start as soon as slots allow; any left
+            # start when this Critic Task's terminal transition frees its slot (Req 7.1, 7.4).
+            self.scheduler.add(new_task)
+        if action.end is not None:
+            self._pending_end = (action.end, action.acceptance)
+
     def _trace_violations(self, violations) -> None:
         for violation in violations:
             self.trace.record("citation_violation", **violation.trace_fields())
 
-    # the run
+    # termination and loop end
 
-    def _tick(self) -> None:
-        self.board.set_elapsed(self.clock.monotonic() - self._started)
-
-    async def execute(self) -> RunResult:
-        self._started = self.clock.monotonic()
-        self._setup()
-        self.trace.record(
-            "run_started",
-            system=SystemName.MULTI,
-            incident_id=self.snapshot.incident_id,
-            seed=self.config.seed,
-            effective_config=self.config.model_dump(mode="json"),
-        )
-        await self.board.record_initial_claims()
-        graph = default_task_graph(self.factory)
-        for task in graph:
-            await self._add(task)
-        observability, dependency, reasoning, critic, reporting = (t.task_id for t in graph)
-
-        end = await self._loop([observability, dependency], reasoning, critic)
-        report = await self._finish(end, reporting)
+    def _on_loop_end(self, reason: TerminationReason) -> None:
+        """Runs synchronously when the reason is recorded: stop everything but Reporting (Req 18.8)."""
         self._tick()
-        self.trace.record(
-            "run_ended",
-            termination_reason=end.reason,
-            critic_rounds={"used": self.board.usage.critic_rounds, "limit": self.limits.critic_rounds},
-            tool_calls={"used": self.board.usage.tool_calls, "limit": self.limits.tool_calls},
-            input_tokens=self.board.usage.tokens.input_tokens,
-            output_tokens=self.board.usage.tokens.output_tokens,
-            tokens={"used": self.board.usage.total_tokens, "limit": self.limits.tokens},
-            wall_clock_s={"used": self.board.usage.elapsed_s, "limit": self.limits.wall_clock_s},
-        )
-        trace = self.trace.to_trace()
-        ledger = self.board.to_state()
-        self.sink.write(report, trace, ledger)
-        return RunResult(report=report, trace=trace, ledger=ledger, elapsed_s=self.board.usage.elapsed_s)
+        self.trace.record("termination", reason=reason, usage=self.board.usage)
+        self.layer.close()
+        self.gateway.end_loop()
+        self.scheduler.cancel_all(include_reporting=False)
 
-    async def _run_specialists(self, task_ids: list[str]) -> None:
-        outcomes = await self._run_concurrently(task_ids)
-        for task_id, outcome in zip(task_ids, outcomes):
-            if outcome is not None:
-                await self._commit_findings(outcome)
-            request_id = self.tasks[task_id].evidence_request_id
-            if request_id is not None:
-                status = EvidenceRequestStatus.COMPLETED if outcome is not None else EvidenceRequestStatus.FAILED
-                await self._set_request_status(request_id, status)
-
-    async def _set_request_status(self, request_id: str, status: EvidenceRequestStatus) -> None:
-        for request in self.board.evidence_requests():
-            if request.request_id == request_id:
-                await self.board.upsert_evidence_request(request.model_copy(update={"status": status}))
-
-    async def _loop(self, specialists: list[str], reasoning: str, critic: str) -> _LoopEnd:
-        budget = self.limits.critic_rounds
-        while True:
-            await self._run_specialists(specialists)
-            outcome = await self._run_task(reasoning)
-            if outcome is not None:
-                await self._commit_reasoning(outcome)
-            if not self.board.active_hypotheses():
-                await self._transition(critic, TaskState.CANCELLED)
-                return _LoopEnd(TerminationReason.NO_HYPOTHESES)
-            critic_round = self.board.increment_critic_round()
-            outcome = await self._run_task(critic)
-            if outcome is None:
-                return _LoopEnd(TerminationReason.CRITIC_FAILED)
-            decision: CriticOutput = outcome.output  # type: ignore[assignment]
-            requests = self._requests(decision, critic_round)
-            self.trace.record(
-                "critic_decision",
-                critic_round=critic_round,
-                accepted_hypothesis_id=decision.accept_hypothesis_id,
-                evidence_requests=requests,
-            )
-            if decision.accept_hypothesis_id is not None:
-                return _LoopEnd(TerminationReason.CRITIC_ACCEPTED, decision.accept_hypothesis_id)
-            if critic_round >= budget:
-                for request in requests:
-                    await self.board.upsert_evidence_request(request)
-                return _LoopEnd(TerminationReason.MAX_CRITIC_ROUNDS)
-            specialists = []
-            for request in requests:
-                task = await self._add(
-                    self.factory.new(
-                        request.target,
-                        TaskKind.EVIDENCE_REQUEST,
-                        evidence_request_id=request.request_id,
-                        critic_round=critic_round,
-                        focus=request.question,
-                    )
-                )
-                await self.board.upsert_evidence_request(request.model_copy(update={"task_id": task.task_id}))
-                specialists.append(task.task_id)
-            reasoning = (await self._add(self.factory.new(AgentName.REASONING, TaskKind.REASONING, tuple(specialists)))).task_id
-            critic = (
-                await self._add(
-                    self.factory.new(AgentName.CRITIC, TaskKind.CRITIC, (reasoning,), critic_round=critic_round + 1)
-                )
-            ).task_id
-
-    def _requests(self, decision: CriticOutput, critic_round: int) -> tuple[EvidenceRequest, ...]:
-        requests = []
-        for i, draft in enumerate(decision.evidence_requests, start=1):
-            params = {k: v for k, v in draft.suggested_params.items() if k != "tool"}
-            try:
-                parsed = TOOL_INPUT_MODELS[draft.suggested_tool].model_validate({**params, "tool": draft.suggested_tool.value})
-            except ValidationError:  # the Critic check already rejects these; keep the run going regardless
-                continue
-            requests.append(
-                EvidenceRequest(
-                    request_id=f"ER{critic_round}.{i}",
-                    critic_round=critic_round,
-                    target=draft.target,
-                    hypothesis_id=draft.hypothesis_id,
-                    concern=draft.concern,
-                    question=draft.question,
-                    suggested_tool=draft.suggested_tool,
-                    suggested_params=parsed,
-                    rationale=draft.rationale,
-                    status=EvidenceRequestStatus.TASKED,
-                )
-            )
-        return tuple(requests)
-
-    # loop end
-
-    async def _finish(self, end: _LoopEnd, reporting_task: str) -> InvestigationReport:
-        for task in list(self.tasks.values()):
-            if task.state is TaskState.PENDING and task.task_id != reporting_task:
-                await self._transition(task.task_id, TaskState.CANCELLED)
-        self._tick()
-        record = await self.board.set_termination(end.reason)
-        self.trace.record("termination", reason=end.reason, usage=record.usage)
-
-        for request in self.board.evidence_requests():
-            if request.status in (EvidenceRequestStatus.TASKED, EvidenceRequestStatus.UNFULFILLED) and (
-                request.task_id is None or self.tasks[request.task_id].state is not TaskState.COMPLETED
-            ):
-                await self.board.upsert_evidence_request(request.model_copy(update={"status": EvidenceRequestStatus.UNFULFILLED}))
-                await self.board.add_gap(
-                    DataGapDraft(
-                        source=request.target,
-                        query=request.suggested_params,
-                        reason=f"unfulfilled_evidence_request:{request.request_id}:{end.reason}",
-                        affected_time_range=input_time_range(request.suggested_params),
-                    )
-                )
-
-        adjustments = apply_confidence_policy(
-            self.board.active_hypotheses(),
-            self.board.superseded_hypotheses(),
-            self.board.data_gaps(),
-            self.config.policy.data_gap_penalty,
-        )
-        await self.board.set_adjustments(adjustments)
-        self.trace.record(
-            "confidence_applied",
-            adjustments=adjustments,
-            gap_count=adjustments[0].gap_count if adjustments else 0,
-            penalty=self.config.policy.data_gap_penalty,
-        )
-        decision = investigator_verdict(
-            end.reason,
-            end.acceptance,
-            ranked_hypotheses(self.board),
-            self.board.ledger_view(),
-            self.config.policy.conclusive_threshold,
-        )
-        await self.board.set_verdict(decision.verdict, end.acceptance)
-        self.trace.record("verdict_set", verdict=decision.verdict, conditions=decision.conditions)
-
-        assembler = ReportAssembler()
-        drg = DeterministicReportGenerator(assembler)
-        max_actions = self.config.report.max_recommended_actions
-        remaining = self.limits.tokens - self.board.usage.total_tokens
-        if remaining < self.limits.reporting_reserve:
-            await self._transition(reporting_task, TaskState.CANCELLED)
+    async def _loop_end_steps(self) -> None:
+        """Design loop-end steps 2-5, each at most once, with no await on a Tool or an LLM."""
+        reason = self.arbiter.reason
+        assert reason is not None
+        # Step 1 ran when the reason was recorded; repeat it for Tasks added after that (a plan whose
+        # own LLM call ended the loop). Cancelling is idempotent.
+        self.scheduler.cancel_all(include_reporting=False)
+        if not self._gaps_recorded:
+            self._gaps_recorded = True
+            await self._record_unfulfilled_requests(reason)
+        if self.board.termination is None:
             self._tick()
-            return drg.build(self.board, SystemName.MULTI, self.limits, max_actions)
-        # A failed Reporting Task records its Data_Gap after the Verdict; it changes nothing (Req 17.10).
-        outcome = await self._run_task(reporting_task, after_verdict=True)
-        self._tick()
-        if outcome is None:
-            return drg.build(self.board, SystemName.MULTI, self.limits, max_actions)
-        return self._reporting_report(outcome, assembler)
+            await self.board.set_termination(reason)
+        if not self._confidence_applied:
+            self._confidence_applied = True
+            adjustments = apply_confidence_policy(
+                self.board.active_hypotheses(),
+                self.board.superseded_hypotheses(),
+                self.board.data_gaps(),
+                self.config.policy.data_gap_penalty,
+            )
+            await self.board.set_adjustments(adjustments)
+            self.trace.record(
+                "confidence_applied",
+                adjustments=adjustments,
+                gap_count=adjustments[0].gap_count if adjustments else 0,
+                penalty=self.config.policy.data_gap_penalty,
+            )
+        if self.board.verdict is None:
+            decision = investigator_verdict(
+                reason,
+                self._acceptance,
+                ranked_hypotheses(self.board),
+                self.board.ledger_view(),
+                self.config.policy.conclusive_threshold,
+            )
+            await self.board.set_verdict(decision.verdict, self._acceptance)
+            self.trace.record("verdict_set", verdict=decision.verdict, conditions=decision.conditions)
 
-    def _reporting_report(self, outcome: AgentOutcome, assembler: ReportAssembler) -> InvestigationReport:
+    async def _record_unfulfilled_requests(self, reason: TerminationReason) -> None:
+        """One Data_Gap per kept Evidence_Request without a completed or failed Task (Req 17.3)."""
+        for request in self.board.evidence_requests():
+            if request.status is EvidenceRequestStatus.DUPLICATE:
+                continue
+            if request.task_id is not None and request.task_id in self.graph:
+                if self.graph.get(request.task_id).state in (TaskState.COMPLETED, TaskState.FAILED):
+                    continue
+            self.board.put_evidence_request(request.model_copy(update={"status": EvidenceRequestStatus.UNFULFILLED}))
+            await self.board.add_gap(
+                DataGapDraft(
+                    source=request.target,
+                    query=request.suggested_params,
+                    reason=f"unfulfilled_evidence_request:{request.request_id}:{reason}",
+                    affected_time_range=input_time_range(request.suggested_params),
+                )
+            )
+
+    def _reporting_task(self) -> Task | None:
+        return next((t for t in self.graph if t.kind is TaskKind.REPORTING), None)
+
+    def _drg(self) -> InvestigationReport:
+        self._tick()
+        return DeterministicReportGenerator(ReportAssembler()).build(
+            self.board, SystemName.MULTI, self.limits, self.config.report.max_recommended_actions
+        )
+
+    async def _report_path(self) -> InvestigationReport:
+        reporting = self._reporting_task()
+        if reporting is None or reporting.state is not TaskState.PENDING:
+            return self._drg()
+        remaining = self.limits.tokens - self.board.usage.total_tokens
+        if self.arbiter.reason is TerminationReason.WALL_CLOCK_TIMEOUT or remaining < self.limits.reporting_reserve:
+            self.scheduler.cancel_pending(reporting.task_id)  # before any Reporting LLM call (Req 12.7)
+            return self._drg()
+        self.scheduler.release_reporting()
+        await self.scheduler.wait_terminal(reporting.task_id)
+        self._tick()
+        if self._reporting_outcome is None:
+            # Failed after its retry (Data_Gap recorded with after_verdict, Req 12.6, 17.10) or cancelled.
+            return self._drg()
+        return self._reporting_report(self._reporting_outcome)
+
+    def _reporting_report(self, outcome: AgentOutcome) -> InvestigationReport:
         output: ReportingOutput = outcome.output  # type: ignore[assignment]
         result = self.validator.validate(
             CitableOutput(claims=output.summary_claims, actions=output.recommended_actions),
@@ -445,7 +442,7 @@ class InvestigatorRun:
             )
             for body, label in zip(result.output.claims, result.labels)
         ]
-        return assembler.assemble(
+        return ReportAssembler().assemble(
             self.board,
             system=SystemName.MULTI,
             built_by="reporting_agent",
@@ -453,6 +450,81 @@ class InvestigatorRun:
             limits=self.limits,
             extra_claims=extra,
         )
+
+    # the run
+
+    async def _investigate(self) -> InvestigationReport:
+        graph, _ = await self.planner.plan(self.inputs.incident_report, self.factory)
+        self.scheduler.extend(list(graph))
+        await self.arbiter.wait()
+        await self._loop_end_steps()
+        return await self._report_path()
+
+    async def _watchdog(self) -> None:
+        """Return when the wall-clock timeout elapses, measured on the Clock from Run start.
+
+        Expressed as a Clock timeout on an event that never fires, so it is a timer on both clocks
+        (an event-loop timer on the SystemClock) and is cancelled cleanly when the Run finishes."""
+        never = asyncio.Event()
+        with suppress(ClockTimeout):
+            await self.clock.wait_for(never.wait(), self.limits.wall_clock_s)
+
+    async def _after_timeout(self) -> InvestigationReport:
+        """The watchdog fired: no further Tool_Call or LLM call, every Task cancelled, then the DRG (Req 18.5, 18.6)."""
+        self.layer.close()
+        self.gateway.close()
+        self.arbiter.signal(TerminationReason.WALL_CLOCK_TIMEOUT, point=CheckPoint.WATCHDOG)
+        self.scheduler.cancel_all(include_reporting=True)
+        await self._loop_end_steps()
+        return self._drg()
+
+    async def execute(self) -> RunResult:
+        self._started = self.clock.monotonic()
+        self._setup()
+        self.trace.record(
+            "run_started",
+            system=SystemName.MULTI,
+            incident_id=self.snapshot.incident_id,
+            seed=self.config.seed,
+            effective_config=self.config.model_dump(mode="json"),
+        )
+        await self.board.record_initial_claims()  # before the first Task (Req 1.4)
+
+        watchdog = asyncio.ensure_future(self._watchdog())
+        body = asyncio.ensure_future(self._investigate())
+        try:
+            await asyncio.wait({body, watchdog}, return_when=asyncio.FIRST_COMPLETED)
+            if body.done():
+                report = body.result()
+            else:
+                body.cancel()
+                with suppress(asyncio.CancelledError):
+                    await body
+                report = await self._after_timeout()
+        finally:
+            for future in (watchdog, body):
+                if not future.done():
+                    future.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await future
+            await self.scheduler.shutdown()
+
+        self._tick()
+        usage = self.board.usage
+        self.trace.record(
+            "run_ended",
+            termination_reason=report.termination_reason,
+            critic_rounds={"used": usage.critic_rounds, "limit": self.limits.critic_rounds},
+            tool_calls={"used": usage.tool_calls, "limit": self.limits.tool_calls},
+            input_tokens=usage.tokens.input_tokens,
+            output_tokens=usage.tokens.output_tokens,
+            tokens={"used": usage.total_tokens, "limit": self.limits.tokens},
+            wall_clock_s={"used": usage.elapsed_s, "limit": self.limits.wall_clock_s},
+        )
+        trace = self.trace.to_trace()
+        ledger = self.board.to_state()
+        self.sink.write(report, trace, ledger)
+        return RunResult(report=report, trace=trace, ledger=ledger, elapsed_s=usage.elapsed_s)
 
 
 async def run_investigator(inputs: RunInputs, deps: RunDependencies, sink: RunOutputSink) -> RunResult:
