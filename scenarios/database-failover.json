@@ -1,0 +1,25 @@
+{
+  "name": "database-failover",
+  "description": "The primary database loses its primary node and fails over to a lagging replica. An unrelated deployment on an upstream service lands exactly 5 minutes before onset.",
+  "service_count": 10,
+  "telemetry_window_hours": 3,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 110,
+  "fault": {
+    "template": "database_failover",
+    "root_role": "primary_db",
+    "cause_type": "database_failover",
+    "params": {"failover_minutes": 6, "lag_peak_s": 45}
+  },
+  "trap": {
+    "red_herrings": [{"kind": "unrelated_deploy_near_onset", "target_role": "upstream", "offset_minutes": -5}],
+    "decoy_cause_type": "deploy_regression"
+  },
+  "report": {
+    "title": "Write errors on {affected}",
+    "symptoms": ["HTTP 5xx rate on {affected} above 15%", "Orders submitted through {affected} fail to save"],
+    "severity": "sev2",
+    "start_delay_minutes": 3
+  },
+  "conditions": ["db_failover_decoy_deploy"]
+}

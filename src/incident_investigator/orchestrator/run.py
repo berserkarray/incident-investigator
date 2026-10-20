@@ -53,10 +53,9 @@ from ..state.blackboard import Blackboard
 from ..state.citations import CitableOutput, CitationValidator, apply_claim_updates
 from ..state.confidence import apply_confidence_policy
 from ..state.verdict import investigator_verdict
-from ..tools.layer import BoardToolBudget, ScopedToolPort, ToolLayer
+from ..tools.layer import BoardToolBudget, ScopedToolPort, build_tool_layer
 from ..tools.ports import ToolPort
 from ..tools.snapshot import PathGuard, SnapshotLoader
-from ..tools.summary import ObservationSummarizer
 from ..tracing import TraceRecorder
 from .critic_loop import CriticLoop
 from .graph import TaskFactory, TaskGraph
@@ -133,14 +132,15 @@ class InvestigatorRun:
             wall_clock_s=self.limits.wall_clock_s,
             on_end=self._on_loop_end,
         )
-        self.layer = ToolLayer(
+        # The full pipeline: Failure_Injector, Retry_Policy and Circuit_Breaker from the config (Req 14, 15).
+        self.layer = build_tool_layer(
             snapshot=self.snapshot,
+            config=self.config,
             ledger=self.board,
             gaps=self.board,
             budget=BoardToolBudget(self.board, self.limits.tool_calls),
             trace=self.trace,
             clock=self.clock,
-            summarizer=ObservationSummarizer(self.config.report.observation_summary_size),
             termination=_DeferredToolSignal(self.arbiter),
         )
         self.gateway = LLMGateway(

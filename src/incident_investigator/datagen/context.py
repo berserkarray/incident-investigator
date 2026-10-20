@@ -8,7 +8,7 @@ import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from ..models.scenario import ScenarioSpec
+from ..models.scenario import ComponentRole, ScenarioSpec
 from ..models.vocab import ChangeType, ComponentKind, LogLevel, MetricName
 from .rng import stream
 from .topology import Topology
@@ -30,6 +30,16 @@ BASELINE_METRICS: dict[ComponentKind, dict[MetricName, tuple[float, float]]] = {
     ComponentKind.LOAD_BALANCER: {MetricName.REQUEST_RATE: (400.0, 0.06), MetricName.ERROR_RATE: (0.003, 0.5)},
     ComponentKind.THIRD_PARTY_API: {MetricName.LATENCY_P99_MS: (250.0, 0.12), MetricName.ERROR_RATE: (0.002, 0.5)},
     ComponentKind.QUEUE: {MetricName.REQUEST_RATE: (60.0, 0.1)},
+}
+# Baselines for series that only some templates create (for example CPU on one service).
+ON_DEMAND_METRICS: dict[MetricName, tuple[float, float]] = {
+    MetricName.CPU_UTILIZATION: (0.35, 0.08),
+    MetricName.REPLICATION_LAG_S: (0.4, 0.3),
+    MetricName.MEMORY_UTILIZATION: (0.45, 0.04),
+    MetricName.DISK_UTILIZATION: (0.5, 0.01),
+    MetricName.REQUEST_RATE: (100.0, 0.08),
+    MetricName.ERROR_RATE: (0.004, 0.5),
+    MetricName.LATENCY_P99_MS: (150.0, 0.1),
 }
 
 
@@ -95,6 +105,20 @@ class GenContext:
     def at_minute(self, minute: float) -> datetime:
         return self.window_start + timedelta(minutes=minute)
 
+    @property
+    def affected(self) -> str:
+        return self.topology.role(ComponentRole.AFFECTED)
+
+    def fill(self, text: str) -> str:
+        """Replace ``{affected}`` in Incident_Report text with the affected service's name."""
+        return text.replace("{affected}", self.affected)
+
+    def report_title(self) -> str:
+        return self.fill(self.spec.report.title)
+
+    def report_symptoms(self) -> tuple[str, ...]:
+        return tuple(self.fill(s) for s in self.spec.report.symptoms)
+
     def pid(self, prefix: str, scope: str) -> str:
         key = f"{prefix}:{scope}"
         n = self._counters.get(key, 0)
@@ -111,7 +135,9 @@ class GenContext:
         """The minute-resolution series for a component metric, created at baseline if absent."""
         key = (component, metric)
         if key not in self.series:
-            base, jitter = BASELINE_METRICS.get(self.topology.kind(component), {}).get(metric, (1.0, 0.05))
+            base, jitter = BASELINE_METRICS.get(self.topology.kind(component), {}).get(
+                metric, ON_DEMAND_METRICS.get(metric, (1.0, 0.05))
+            )
             rng = self.rng(f"series:{component}:{metric}")
             self.series[key] = [max(0.0, base * (1 + rng.uniform(-jitter, jitter))) for _ in range(self.minutes)]
         return self.series[key]

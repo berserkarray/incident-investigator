@@ -1,12 +1,12 @@
 """The Tool_Layer pipeline: validate -> Circuit_Breaker -> Tool_Call Budget -> call -> summarise -> append.
 
 Rejection precedence follows design D1. The breaker and budget checks run on every attempt, so a
-retry can itself be rejected. Only the Tool_Layer writes Evidence_Items and tool Data_Gaps.
+retry can itself be rejected. Only ``timeout`` is retried. Only the Tool_Layer writes Evidence_Items
+and tool Data_Gaps; each failed Tool_Request (final ``timeout``, ``circuit_open``, ``budget_exhausted``)
+records exactly one Data_Gap before its Observation is returned (Req 17.1).
 """
 
-import time
 from collections.abc import Mapping
-from enum import StrEnum, auto
 from typing import Protocol
 
 from pydantic import ValidationError
@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from ..clock import Clock
 from ..errors import RunClosed
 from ..models.base import JsonValue, TimeRange
+from ..models.config import InvestigatorConfig
 from ..models.evidence import Observation, ObservationSummary
 from ..models.gaps import DataGapDraft
 from ..models.snapshot import IncidentSnapshot
@@ -28,15 +29,23 @@ from ..models.tools import (
 )
 from ..models.vocab import Caller, ErrorCode, Reliability, TerminationReason, ToolName
 from ..tracing import TraceRecorder
+from .breaker import Admission, CircuitBreaker
 from .impl import TOOL_REGISTRY, ToolFn, cut_to_limit
+from .injector import FailureInjector
 from .ports import EvidenceSink, GapSink, TerminationSignal, ToolBudget
+from .retry import RetryPolicy
 from .summary import ObservationSummarizer
 
-
-class Admission(StrEnum):
-    NORMAL = auto()
-    TRIAL = auto()
-    REJECT = auto()
+__all__ = [
+    "Admission",
+    "AlwaysClosedBreaker",
+    "BoardToolBudget",
+    "NoFailureInjector",
+    "NoRetry",
+    "ScopedToolPort",
+    "ToolLayer",
+    "build_tool_layer",
+]
 
 
 class Breaker(Protocol):
@@ -48,7 +57,7 @@ class Breaker(Protocol):
 
 
 class AlwaysClosedBreaker:
-    """Placeholder breaker for the thin slice; the real Circuit_Breaker arrives in task 5.4."""
+    """A breaker that never opens. For tests that isolate other stages; Runs use ``CircuitBreaker``."""
 
     def admit(self, tool: ToolName, now: float) -> Admission:
         return Admission.NORMAL
@@ -67,7 +76,7 @@ class Injector(Protocol):
 
 
 class NoFailureInjector:
-    """Placeholder injector: never injects; applies the record limit (Req 13.9)."""
+    """An injector that never injects; applies the record limit (Req 13.9). Runs use ``FailureInjector``."""
 
     def apply(self, tool: ToolName, inp: ToolInputBase, attempt: int, matches: list[ToolRecord]) -> ToolResult:
         records, truncated = cut_to_limit(matches, inp.limit)
@@ -194,21 +203,23 @@ class ToolLayer:
 
         fn = self._registry[tool_name]
         for attempt in range(1, self._retry.max_attempts + 1):
-            now = self._clock.monotonic()
-            # 2. Circuit_Breaker
-            admission = self._breaker.admit(tool_name, now)
+            if self._closed:
+                raise RunClosed("the Run has ended")
+            # 2. Circuit_Breaker, on every attempt (Req 15.5)
+            admission = self._breaker.admit(tool_name, self._clock.monotonic())
             if admission is Admission.REJECT:
                 return await self._rejected(caller, task_id, tool_name, inp, raw, ErrorCode.CIRCUIT_OPEN)
-            # 3. Tool_Call Budget
+            # 3. Tool_Call Budget, on every attempt (Req 15.9, 18.2)
             if not self._budget.try_reserve():
                 if admission is Admission.TRIAL:
                     self._breaker.release_trial(tool_name)
                 if self._termination is not None:
                     self._termination.signal(TerminationReason.TOOL_CALL_BUDGET_EXHAUSTED)
                 return await self._rejected(caller, task_id, tool_name, inp, raw, ErrorCode.BUDGET_EXHAUSTED)
-            # 4. the call itself
-            started = time.perf_counter()
+            # 4. the Tool_Call itself: pure Tool, then failure injection
+            started = self._clock.monotonic()
             result = self._injector.apply(tool_name, inp, attempt, fn(inp, self._snapshot))
+            returned = self._clock.monotonic()
             timed_out = result.error is not None and result.error.code is ErrorCode.TIMEOUT
             self._trace.record(
                 "tool_call",
@@ -222,17 +233,18 @@ class ToolLayer:
                 partial=result.partial,
                 stale=result.stale,
                 truncated=result.truncated,
-                duration_s=time.perf_counter() - started,
+                duration_s=max(0.0, returned - started),
             )
-            self._breaker.record(tool_name, admission, timed_out, self._clock.monotonic())
+            self._breaker.record(tool_name, admission, timed_out, returned)
             if timed_out:
+                # Only timeouts are retried (Req 15.1); the wait runs on the Clock (Req 15.11).
                 if attempt < self._retry.max_attempts:
                     await self._clock.sleep(self._retry.delay(tool_name, inp, attempt))
                     continue
                 await self._gap(tool_name, inp, ErrorCode.TIMEOUT)
                 return self._error_observation(tool_name, inp, raw, result.error)
-            # 5. success: summarise and append exactly one Evidence_Item (Req 3.2-3.6)
-            summary = self._summarizer.summarize(result)
+            # 5. success, including partial and stale (Req 15.3): summarise and append one Evidence_Item
+            summary = self._summarizer.summarize(result, inp)
             item = await self._ledger.append_evidence(
                 tool=tool_name,
                 query=inp,
@@ -307,6 +319,38 @@ class ToolLayer:
             summary=ObservationSummary(record_count=0, note=error.code.value),
             error=error,
         )
+
+
+def build_tool_layer(
+    *,
+    snapshot: IncidentSnapshot,
+    config: InvestigatorConfig,
+    ledger: EvidenceSink,
+    gaps: GapSink,
+    budget: ToolBudget,
+    trace: TraceRecorder,
+    clock: Clock,
+    termination: TerminationSignal | None = None,
+) -> ToolLayer:
+    """The full pipeline for one Run, shared by the Investigator and the Baseline_Agent.
+
+    The Run Seed drives failure injection and retry jitter; every Run gets a fresh Circuit_Breaker
+    with every Tool closed (Req 15.8).
+    """
+    tools = config.tools
+    return ToolLayer(
+        snapshot=snapshot,
+        ledger=ledger,
+        gaps=gaps,
+        budget=budget,
+        trace=trace,
+        clock=clock,
+        summarizer=ObservationSummarizer(config.report.observation_summary_size),
+        termination=termination,
+        injector=FailureInjector(config.seed, snapshot, tools.failure_injection),
+        breaker=CircuitBreaker.from_settings(tools.circuit_breaker),
+        retry=RetryPolicy.from_settings(config.seed, tools.retry),
+    )
 
 
 class ScopedToolPort:

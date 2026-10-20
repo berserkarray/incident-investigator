@@ -5,14 +5,13 @@ from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
-from ...models.answer_key import RootCauseLabel
 from ...models.scenario import FaultTemplateName
 from ...models.vocab import ChangeType, LogLevel, MetricName
 from ..context import GenContext
-from .base import FaultResult, ramp
+from .base import FaultResult, TemplateParams, label, ramp, root_component
 
 
-class ConfigRegressionParams(BaseModel):
+class ConfigRegressionParams(TemplateParams):
     setting: str = "db.pool.max_connections"
     old_value: str = "50"
     new_value: str = "5"
@@ -28,7 +27,7 @@ class ConfigRegression:
 
     def generate(self, ctx: GenContext, params: BaseModel) -> FaultResult:
         p = ConfigRegressionParams.model_validate(params.model_dump())
-        root = ctx.topology.role(ctx.spec.fault.root_role)
+        root = root_component(ctx)
         result = FaultResult()
         rng = ctx.rng("fault")
 
@@ -69,6 +68,6 @@ class ConfigRegression:
             *[log.pid for log in result.logs if log.level is LogLevel.ERROR][:3],
             *(ctx.metric_pid(root, MetricName.ERROR_RATE, m) for m in range(onset, min(onset + 5, ctx.minutes))),
         ]
-        result.root_cause = RootCauseLabel(component=root, cause_type=ctx.spec.fault.cause_type)
+        result.root_cause = label(ctx, root)
         result.contributing_factors = [f"no alert on {p.setting} changes"]
         return result

@@ -156,24 +156,24 @@ Each worktree has its own `.venv` with an editable install of that worktree (`py
 
 All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tests against those interfaces and merges last, after the others (task 10.1).
 
-- [ ] 5. Workstream `ws/tools-data`: tools, failures and the dataset
-  - [ ] 5.1 Write the remaining four tools and their summaries
+- [x] 5. Workstream `ws/tools-data`: tools, failures and the dataset
+  - [x] 5.1 Write the remaining four tools and their summaries
     - `query_metrics` (buckets aligned to range start, mean/min/max/count, `constituent_ids`), `get_deployments`, `get_dependencies` (BFS both directions, shortest hop, final-hop edge ID), `search_incidents` (term match over title, summary, symptoms, resolution).
     - Fill in the per-Tool summary entries and `metric_stats` from design D3.
     - Source record IDs: record ID followed by its constituents, de-duplicated (D9).
     - _Requirements: 13.4, 13.5, 13.6, 13.7, 13.10, 3.11_
-  - [ ] 5.2 Write the Failure_Injector
+  - [x] 5.2 Write the Failure_Injector
     - `tools/injector.py`: `outcome()` and `apply()` from design (sha256 key over seed, incident ID, Tool, canonical input, attempt), forced Failure_Profile entries first, random selection only when enabled, no stale-data for `get_dependencies` and `search_incidents`, partial and stale record selection.
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6, 14.7_
-  - [ ] 5.3 Write the Failure_Injector determinism property test
+  - [x] 5.3 Write the Failure_Injector determinism property test
     - **Property 33: Failure injection is deterministic.** Generate seed, small snapshot, probabilities, Tool, input and attempt. Assert identical outcomes across repeated calls, re-ordered or default-explicit inputs, different callers, and a shuffled and `asyncio.gather`-interleaved sequence of other calls. 25 examples.
     - **Validates: Requirements 14.2**
-  - [ ] 5.4 Write the Retry_Policy, Circuit_Breaker and full ToolLayer pipeline
+  - [x] 5.4 Write the Retry_Policy, Circuit_Breaker and full ToolLayer pipeline
     - `tools/retry.py`: delay `min(cap, b + b·u)` with hash-derived jitter.
     - `tools/breaker.py`: per-Tool closed/open state, Consecutive_Failure_Count, one Trial_Call after cooldown, `release_trial`.
     - Update `tools/layer.py`: retry only on `timeout`; breaker and budget checks on every attempt; `circuit_open`, `budget_exhausted` and final `timeout` each record one Data_Gap before returning; `budget_exhausted` signals termination; trace every Tool_Call and rejection.
     - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7, 15.8, 15.9, 15.10, 15.11, 17.1, 17.7, 18.2_
-  - [ ] 5.5 Write core tool, failure, retry and breaker tests
+  - [x] 5.5 Write core tool, failure, retry and breaker tests
     - Each Tool against hand-built snapshots: filters, half-open bounds, truncation order, zero matches.
     - `invalid_input` makes no Tool_Call, records no Data_Gap and leaves the breaker unchanged.
     - Injected timeout, partial and stale shapes; forced failure on every attempt; random injection disabled.
@@ -193,17 +193,17 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 9: Observation_Summary is deterministic and bounded.** **Validates: Requirements 3.11**
   - [ ]* 5.7 Failure-type distribution property (lowest priority)
     - **Property 36: Failure-type distribution.** **Validates: Requirements 14.8**
-  - [ ] 5.8 Write the remaining Fault_Templates, Traps and noise
+  - [x] 5.8 Write the remaining Fault_Templates, Traps and noise
     - Templates: `database_failover`, `third_party_outage`, `memory_leak`, `certificate_expiry`, `cache_stampede`, `lb_misconfiguration`, `disk_full`, `connection_pool_exhaustion`, `symptoms_only`, `feature_flag_regression`, `cascading_failure`.
     - Traps: `unrelated_deploy_near_onset`, `noisy_alerts`, `innocent_config_change`, `traffic_spike`, `disagreeing_monitors`, `lookalike_past_incident`.
     - `NoiseConstraints` honoured by the noise generator (`no_changes_in_window`, `no_deploys_on_path_to_root`, and others the templates need).
     - _Requirements: 22.9, 22.10, 22.12, 23.13_
-  - [ ] 5.9 Write the 12 Scenario_Specs and the verification step
+  - [x] 5.9 Write the 12 Scenario_Specs and the verification step
     - `scenarios/*.json` for the 12 rows of the design catalogue table, each naming its `CatalogueCondition`. `logs-timeout` forces `query_logs: timeout`.
     - `datagen/checks.py`: one condition check per catalogue row (Req 23.1–23.12), the generic checks (Req 22.13), and the leak scan of every Snapshot_Root file (canary, scenario and template names, banned marker words). Any violation raises `GenerationError` and writes nothing.
     - `generate` writes all 12 scenarios and stops at the first failure.
     - _Requirements: 22.2, 22.13, 22.17, 23.1–23.12, 23.14, 23.15, 23.16, 24.11, 28.1, 28.8_
-  - [ ] 5.10 Write generator tests
+  - [x] 5.10 Write generator tests
     - For seed 42, all 12 scenarios generate and pass their checks; two generations are byte-identical; the catalogue covers 12 distinct conditions; a broken spec is rejected with field names and writes nothing; no Answer_Key uses `dns_failure`, `rate_limiting`, `code_defect`, `dependency_timeout`, `capacity_limit`, `data_corruption` or `clock_skew` (the taxonomy stays broader than the dataset).
     - _Requirements: 22.2, 22.6, 23.14, 23.16_
   - [ ]* 5.11 Property tests for the generator (lower priority)
@@ -213,7 +213,14 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 52: Generated incidents satisfy structural invariants.** **Validates: Requirements 22.5, 22.7–22.10, 22.13, 22.15, 22.16, 24.5, 24.11**
     - **Property 53: Snapshot round trip.** **Validates: Requirements 22.14**
     - **Property 54: Catalogue conditions hold for every Seed.** **Validates: Requirements 23.1–23.12, 23.15**
-  - [ ] 5.12 Branch checkpoint: tests green on `ws/tools-data`, rebased on `main`.
+  - [x] 5.12 Branch checkpoint: tests green on `ws/tools-data`, rebased on `main`.
+
+  - Notes from `ws/tools-data` (the other workstreams build on these):
+    - `tools.layer.build_tool_layer(snapshot=, config=, ledger=, gaps=, budget=, trace=, clock=, termination=None)` builds the full pipeline (FailureInjector, CircuitBreaker, RetryPolicy, summarizer) from an `InvestigatorConfig`. `orchestrator/run.py` `_setup` now calls it; the Baseline_Agent should too. It does not create a TerminationSignal; 6.8 passes one in.
+    - `Admission` moved to `tools/breaker.py` (still importable from `tools.layer`). `ObservationSummarizer.summarize(result, query=None)` takes the Tool input so incident summaries can rank by matched terms.
+    - Breaker, retry and budget checks run on every attempt; a closed ToolLayer raises `RunClosed` before each attempt, including after a backoff sleep.
+    - `query_metrics` bucket IDs are `"{service}/{metric}:{epoch}:{step}"`; `get_dependencies` breaks shortest-path ties by the lexicographically smallest tuple of edge IDs.
+    - Generated noise and red herrings carry no markers. `GeneratedIncident` keeps in-memory provenance (`fault_record_ids`, `herring_record_ids`) for the checks only; it is never written.
 
 - [x] 6. Workstream `ws/orchestrator-state`: Blackboard, scheduling and termination
   - [x] 6.1 Complete the Blackboard

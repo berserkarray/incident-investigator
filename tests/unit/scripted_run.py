@@ -124,6 +124,8 @@ def base_script(*, critic: Sequence[ScriptEntry] = (), reasoning_rounds: int = 1
     """Findings for every Observability Task, Reasoning per round, the given Critic entries, Reporting."""
     script = [
         *entries(OBS, CallKind.SPECIALIST_FINDINGS, no_findings, n=4),
+        # With the dependency tools in place, Dependency Tasks cite evidence and ask for findings too.
+        *entries(DEP, CallKind.SPECIALIST_FINDINGS, no_findings, n=4),
         *entries(REA, CallKind.REASONING, reasoning_reply, n=reasoning_rounds),
         *critic,
     ]
@@ -170,6 +172,8 @@ async def run_scripted(tmp_path: Path, script: Sequence[ScriptEntry], **config_s
     snapshot, report = make_snapshot(), make_incident_report()
     snapshot_dir = write_snapshot(tmp_path, snapshot, report)
     paths = {"snapshot_root": str(tmp_path / "snapshots"), "answer_key_root": str(tmp_path / "keys")}
+    # Scripted runs turn random failure injection off so every Tool_Call is predictable.
+    config_sections.setdefault("tools", {"failure_injection": {"random_enabled": False}})
     config = make_config(paths=paths, **config_sections).for_system_under_test()
     clock = FakeClock()
     fake = ScriptedFakeLLM(script, clock)

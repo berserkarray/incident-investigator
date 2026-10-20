@@ -1,0 +1,22 @@
+{
+  "name": "cascading-failure",
+  "description": "An upstream service runs out of worker threads. Its caller times out and logs far more errors than the upstream itself; the entry load balancer follows.",
+  "service_count": 13,
+  "telemetry_window_hours": 4,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 150,
+  "fault": {
+    "template": "cascading_failure",
+    "root_role": "upstream",
+    "cause_type": "resource_exhaustion",
+    "params": {"root_error_logs": 6, "caller_error_logs": 40, "edge_error_logs": 15}
+  },
+  "trap": null,
+  "report": {
+    "title": "Timeouts on {affected}",
+    "symptoms": ["HTTP 504 rate on {affected} above 30%", "p99 latency on {affected} above 2 s"],
+    "severity": "sev2",
+    "start_delay_minutes": 3
+  },
+  "conditions": ["cascading_error_leader"]
+}
