@@ -45,9 +45,8 @@ from ..state.blackboard import Blackboard
 from ..state.citations import CitableOutput, CitationValidator, apply_claim_updates
 from ..state.confidence import apply_confidence_policy
 from ..state.verdict import investigator_verdict
-from ..tools.layer import BoardToolBudget, ScopedToolPort, ToolLayer
+from ..tools.layer import BoardToolBudget, ScopedToolPort, build_tool_layer
 from ..tools.snapshot import PathGuard, SnapshotLoader
-from ..tools.summary import ObservationSummarizer
 from ..tracing import TraceRecorder
 from .graph import TaskFactory, default_task_graph
 
@@ -87,14 +86,14 @@ class InvestigatorRun:
         self.trace = TraceRecorder(self.run_id, SystemName.MULTI, self.clock, self.deps.redactor)
         self.board = Blackboard(self.run_id, self.snapshot.incident_id, self.inputs.incident_report, self.clock, self.trace)
         self.limits = self.config.budgets.limits()
-        self.layer = ToolLayer(
+        self.layer = build_tool_layer(
             snapshot=self.snapshot,
+            config=self.config,
             ledger=self.board,
             gaps=self.board,
             budget=BoardToolBudget(self.board, self.limits.tool_calls),
             trace=self.trace,
             clock=self.clock,
-            summarizer=ObservationSummarizer(self.config.report.observation_summary_size),
         )
         self.gateway = LLMGateway(self.deps.llm_client, self.board, self.trace, self.limits, self.config.llm.model)
 
