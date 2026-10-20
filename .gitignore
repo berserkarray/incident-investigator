@@ -15,3 +15,9 @@ build/
 
 # Local run outputs (committed results live under results/)
 runs/
+
+# Generated data is never committed; reproduce it with the command in README.md (Req 31.5)
+data/snapshots/*
+!data/snapshots/.gitkeep
+data/answer_keys/*
+!data/answer_keys/.gitkeep

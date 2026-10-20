@@ -16,6 +16,8 @@ Scope rules that apply to every task:
 
 Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstreams, each on its own branch and worktree (`git worktree add ../ii-<name> -b ws/<name>`). Phase 4 merges a branch only when its tests pass, rebased on the latest `main`. Phase 5 runs the evaluation.
 
+Each worktree has its own `.venv` with an editable install of that worktree (`python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`). Never run a worktree's tests with the main folder's `.venv`: its editable install points at the main folder's `src` and would silently test `main`'s code. Generated snapshots and answer keys are never committed; the README records the seed and the exact `generate` command (Req 31.5).
+
 ## Tasks
 
 ### Phase 1: Shared models and interfaces (`main`)
@@ -148,7 +150,7 @@ Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstre
     - The Observation_Summary has the logs rule; other record kinds use a generic per-kind count until 5.1.
     - The gateway appends the output JSON Schema to every structured prompt.
 
-- [ ] 4. Checkpoint: thin-slice test green, commit on `main`, then create the five worktrees (`ws/tools-data`, `ws/orchestrator-state`, `ws/agents`, `ws/eval-baseline`, `ws/tests`). Ask the user if questions arise.
+- [x] 4. Checkpoint: thin-slice test green, commit on `main`, then create the five worktrees (`ws/tools-data`, `ws/orchestrator-state`, `ws/agents`, `ws/eval-baseline`, `ws/tests`). Ask the user if questions arise.
 
 ### Phase 3: Parallel workstreams (one branch each)
 

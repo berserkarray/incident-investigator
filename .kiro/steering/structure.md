@@ -38,7 +38,7 @@ Dependency direction: `models` ← everything; `evaluation` may import anything;
 ## Work split and branching
 
 1. **Shared foundation first, on `main`:** `models/`, the `LLMClient` and tool interfaces, the fake LLM skeleton and project packaging. Interfaces change only through `main`.
-2. **Then parallel workstreams, each on its own branch and worktree** (`git worktree add ../ii-<name> -b ws/<name>`):
+2. **Then parallel workstreams, each on its own branch and worktree** (`git worktree add ../ii-<name> -b ws/<name>`). Each worktree gets its own `.venv` with `pip install -e ".[dev]"` of that worktree; never reuse the main folder's `.venv`, whose editable install points at the main folder's `src`. Workstreams:
    - `ws/tools-data`: tools, failure injection, retry, circuit breaker, data generator and scenarios;
    - `ws/orchestrator-state`: blackboard, task graph, scheduler, critic loop, budgets, termination;
    - `ws/agents`: the six agents and prompts;
