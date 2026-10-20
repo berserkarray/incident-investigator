@@ -1,0 +1,439 @@
+# Implementation Plan: Incident Investigator
+
+## Overview
+
+`requirements.md` and `design.md` are the target spec. This task list implements the reduced delivery scope agreed with the user. Every acceptance criterion that is not implemented, and every optional task (`*`) that is not done, must be listed by number in the README "Incomplete Functionality" section (Req 31.4).
+
+Scope rules that apply to every task:
+
+- **Property tests:** only Property 6 (Blackboard concurrent appends), Property 33 (Failure_Injector determinism) and Property 13 (Citation_Validator idempotence) are required. They run with the `ci` Hypothesis profile: `max_examples=25`, `derandomize=True`, `database=None`, `deadline=None`. Every other design property is an optional, lower-priority task. Properties 36, 49, 55 and 56 are the lowest priority.
+- **Req 30.2 coverage:** core-behaviour tests only (tools and failures, retry and breaker, task graph and parallel dispatch, every Termination_Reason, the inconclusive path, the Citation_Validator, scoring rules, canary isolation). The per-criterion traceability test is optional.
+- **Path hardening (Req 24.3, 24.10):** a basic check only. Resolve paths, reject snapshot paths outside the Snapshot_Root, and reject overlapping roots.
+- **CLI and config:** Pydantic validation with clear errors that name each field. Not every numeric bound needs its own test.
+- **Clock:** a simple FakeClock. Tests never wait on the real clock; a conftest guard fails any real non-zero sleep.
+- **LLM provider:** OpenAI, model `gpt-5.4-mini`, key only from `OPENAI_API_KEY`. The OpenAI adapter and the FakeLLM are required. The Anthropic adapter is optional.
+- **Token discipline:** tool-using prompts (Observability, Dependency, Baseline) request `limit` ≤ 25 and use the Tool's filters. Code-issued opening requests use `limit=25`.
+
+Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstreams, each on its own branch and worktree (`git worktree add ../ii-<name> -b ws/<name>`). Phase 4 merges a branch only when its tests pass, rebased on the latest `main`. Phase 5 runs the evaluation.
+
+## Tasks
+
+### Phase 1: Shared models and interfaces (`main`)
+
+- [ ] 1. Shared models, interfaces and test harness
+  - [ ] 1.1 Create the repository skeleton and first commit
+    - Create `.gitignore` with `.env`, `.env.*`, `.venv/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.hypothesis/`, `runs/`, `dist/`, `*.egg-info/`.
+    - Create `pyproject.toml` (Python ≥ 3.11, `src/` layout, console script `incident-investigator = incident_investigator.cli:main`). Pin every direct runtime and dev dependency with `==` (`pydantic`, `openai`, `pytest`, `pytest-asyncio`, `hypothesis`; `anthropic` only in an optional extra if task 7.9 is done). Check current stable versions with `pip index versions <pkg>` at implementation time.
+    - Configure pytest in `pyproject.toml`: `asyncio_mode = "auto"`, `testpaths = ["tests"]`.
+    - Create `config.toml` (`llm.provider = "openai"`, `llm.model = "gpt-5.4-mini"`, design defaults for every other field) and `config.fake.toml` (same, with `llm.provider = "fake"`).
+    - Create the package folders from design "Package layout" with empty `__init__.py`, plus `scenarios/`, `data/snapshots/`, `data/answer_keys/`, `results/`, `transcripts/`, `tests/`.
+    - First commit on `main` must contain `.gitignore`.
+    - _Requirements: 5.9, 31.8, 31.11_
+  - [ ] 1.2 Write the base model and closed vocabularies
+    - `models/base.py`: `StrictModel` (frozen, `extra="forbid"`), `NonBlank(n)`, `TimeRange` (half-open, `start < end`), `JsonValue`, `canonical_json()`.
+    - `models/vocab.py`: `CauseType` (14 values, including `traffic_attack` and `deploy_regression`), `Severity` (sev1–4), `ToolName`, `LogLevel`, `MetricName`, `ChangeType`, `AgentName`, `Caller`, `TaskKind`, `TaskState`, `ConcernCategory` (including `historical_only_support` and `low_reliability_support`), `ActionCategory`, `Reliability`, `Verdict`, `TerminationReason` (Investigator and Baseline sets), `FindingType`, `ErrorCode`.
+    - _Requirements: 10.2, 11.2, 12.5, 13.2, 23.13_
+  - [ ] 1.3 Write the incident, snapshot and tool models
+    - `models/incident.py`: `IncidentReport` with the Req 1.1 constraints, `IncidentClaim`, `ClaimStatusUpdate`.
+    - `models/snapshot.py`: `IncidentSnapshot`, records (logs, metric points, change events, dependency edges, past incidents), `FailureProfile` with its Req 14.9 validators.
+    - `models/tools.py`: one input model per Tool (`limit` 1–500, default 100), `ToolRecord` with `constituent_ids`, `ToolError`, `ToolResult` (records, error, partial, stale, `as_of`, truncated), `Observation`.
+    - _Requirements: 1.1, 13.1, 13.2, 14.9, 25.10_
+  - [ ] 1.4 Write the evidence, claim, output and hypothesis models
+    - `models/evidence.py`: `ObservationSummary`, `EvidenceItem`, `RetainedRecords`, `LedgerView`.
+    - `models/claims.py`, `models/outputs.py`: `ObservabilityClaim`, `DependencyClaim`, `ClaimDraft`, `LabelledClaim`, `SpecialistStep`, the findings models, `PlanOutput`, `HypothesisDraft`, `ReasoningOutput`, `EvidenceRequestDraft`, `CriticOutput`, `RecommendedActionDraft`, `ReportingOutput`, `BaselineStep`, `BaselineFinalAnswer`. Add only the field-level constraints here; context validators come in 3.5 and 7.x.
+    - `models/hypothesis.py`: `HypothesisRevision`, `ConfidenceAdjustment`.
+    - _Requirements: 3.2, 8.3, 9.3, 10.1, 10.2, 10.5, 11.2, 12.3, 12.5, 25.7_
+  - [ ] 1.5 Write the task, gap, budget, state, report and trace models
+    - `models/tasks.py`, `critic.py`, `gaps.py`, `budget.py`: `Task`, `TaskBrief`, `TaskGraphState`, `EvidenceRequest` with status, `DataGap` with `dedupe_key()`, `TokenCount`, `BudgetLimits`, `BudgetUsage`.
+    - `models/blackboard.py`: `BlackboardState`, `TerminationRecord`.
+    - `models/report.py`: `InvestigationReport` with every Req 20.1 section, `ReportHypothesis`, `MissingEvidenceEntry`, `RecommendedAction`.
+    - `models/trace.py`: discriminated `TraceEvent` union (`task_transition`, `tool_call`, `tool_rejected`, `llm_call`, `citation_violation`, `duplicate_discarded`, `plan_fallback`, `critic_decision`, `termination`, `config`, `budget_final`), `RunTrace`.
+    - _Requirements: 3.1, 16.2, 17.1, 18.1, 20.1, 20.2, 29.3, 29.4, 29.5, 29.6_
+  - [ ] 1.6 Write the scenario, answer-key and results models
+    - `models/scenario.py`: `ScenarioSpec` (8–15 services, 2–24 h window, 7–30 day lookback), `Trap`, `RedHerring`, `FaultTemplateName`, `CatalogueCondition`, `NoiseConstraints`.
+    - `models/answer_key.py`: `AnswerKey` (Root_Cause_Label or insufficient marker, Key_Evidence, expected Data_Gaps, canary).
+    - `models/results.py`: `RunScore`, `ResultsRow`, `ResultsTable` (header fields from Req 26.5 and 31.6).
+    - _Requirements: 22.1, 22.2, 22.5, 24.5, 26.5, 27.8_
+  - [ ] 1.7 Write the configuration loader
+    - `models/config.py`: nested settings models with the design defaults and the main Req 29.1 bounds (`Field(ge=..., le=...)`, cross-field validators for delay ordering, probability sum, reserve < tokens, concurrency 1–16).
+    - `load_config(path)` uses `tomllib` and raises `ConfigError` that lists every invalid, unknown or missing field by dotted path. An unreadable or unparseable file raises an error naming the file.
+    - `Config.for_system_under_test()` returns an `InvestigatorConfig` with no answer-key path field.
+    - _Requirements: 7.6, 18.1, 24.7, 29.1, 29.2_
+  - [ ] 1.8 Write the Injectable_Clock
+    - `clock.py`: `Clock` protocol (`now`, `monotonic`, `sleep`, `wait_for`), `SystemClock`, and a simple `FakeClock`.
+    - `FakeClock` keeps a heap of sleepers. `advance(dt)` wakes every due sleeper. With `auto_advance=True`, a driver task jumps to the next deadline after a fixed number of idle event-loop turns. `wait_for` raises `ClockTimeout` at the virtual deadline.
+    - _Requirements: 15.11, 30.5_
+  - [ ] 1.9 Write the component interfaces
+    - `llm/base.py`: `LLMRequest`, `LLMResponse`, `LLMErrorCategory`, `LLMCallError`, `LLMClient` protocol.
+    - `tools/ports.py`: `ToolPort` protocol, `EvidenceSink`, `GapSink`, `ToolBudget`, `TerminationSignal`.
+    - `agents/base.py`: `Agent` ABC and `AgentContext`.
+    - `report/writer.py`: `RunOutputSink` protocol. `orchestrator/run.py`: `RunInputs`, `RunResult`, `RunDependencies`.
+    - `redact.py`: `SecretRedactor` built from `OPENAI_API_KEY` (and `ANTHROPIC_API_KEY` if set).
+    - `trace.py`: `TraceRecorder` that assigns `seq`, stamps time from the Clock and redacts secrets.
+    - _Requirements: 5.1, 5.10, 29.3_
+  - [ ] 1.10 Write the test harness
+    - `tests/conftest.py`: autouse fixtures that delete `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`, block socket creation, and fail on any real `time.sleep` or `asyncio.sleep` with a non-zero delay outside `SystemClock` tests.
+    - Register the Hypothesis `ci` profile (`max_examples=25`, `derandomize=True`, `database=None`, `deadline=None`) and load it by default.
+    - `tests/factories.py`: small builders for snapshots, Incident_Reports, configs and Evidence_Items.
+    - _Requirements: 30.1, 30.3, 30.5_
+  - [ ] 1.11 Write model and config unit tests
+    - Valid and invalid Incident_Report examples with field-named errors. Config load with defaults, an unknown field, an out-of-range concurrency limit and an unparseable file.
+    - _Requirements: 1.1, 1.2, 7.6, 29.2_
+  - [ ]* 1.12 Property tests for models and config (lower priority)
+    - **Property 1: Incident_Report validation.** **Validates: Requirements 1.1, 1.2**
+    - **Property 47: Report JSON round trip.** **Validates: Requirements 21.4**
+    - **Property 64: Configuration validation.** **Validates: Requirements 7.6, 18.1, 29.1, 29.2**
+
+- [ ] 2. Checkpoint: models import cleanly, `pytest` is green, commit on `main`. Ask the user if questions arise.
+
+### Phase 2: Thin end-to-end slice on the FakeLLM (`main`)
+
+- [ ] 3. Thin end-to-end slice
+  - [ ] 3.1 Write the snapshot loader and `query_logs`
+    - `tools/snapshot.py`: `PathGuard` (basic: `resolve(strict=True)` and `is_relative_to(root)`), `SnapshotLoader.load()` reading `snapshot.json`, `failure_profile.json` and `incident_report.json`, raising `SnapshotLoadError(path, reason)`.
+    - `tools/impl.py`: pure `query_logs` (half-open range, levels, case-insensitive text, exact attributes, sort by `(timestamp, record_id)`, cut to `limit`, set `truncated`). Register it in `TOOL_REGISTRY`.
+    - _Requirements: 2.2, 2.3, 2.4, 13.3, 13.9, 13.12, 13.13, 24.3_
+  - [ ] 3.2 Write the ObservationSummarizer
+    - `tools/summary.py`: the D3 algorithm for logs first (count, time span, top-K normalised messages with count and first_seen, allowlisted key attributes, `note` for zero records). Leave stubs for the other Tools that the 5.1 work fills in.
+    - _Requirements: 3.2, 3.11_
+  - [ ] 3.3 Write the minimal ToolLayer pipeline
+    - `tools/layer.py`: `ToolLayer.request()` with the full D1 stage order (validate → breaker → budget → call → summarise → append), using a no-op injector, an always-closed breaker, `max_attempts=1` and an in-memory Tool_Call counter. `invalid_input` returns field-named errors without a Tool_Call.
+    - `ScopedToolPort` restricts each caller to its own Tools.
+    - Return the shared `Observation` format (Evidence_ID, summary, records up to the limit, error, flags).
+    - _Requirements: 2.1, 3.2, 3.3, 3.4, 3.5, 3.6, 13.8, 25.10_
+  - [ ] 3.4 Write the minimal Blackboard
+    - `state/blackboard.py`: one `asyncio.Lock`; `append_evidence` assigns `E0001…` and keeps retained records; claims recorded at Run start (Req 1.4); `add_findings`, `add_hypothesis_revisions` (revision `max + 1`, active set), `set_claim_statuses`, `upsert_task`, `add_gap`, `add_usage`, `set_adjustments`, `set_verdict`; reads `evidence()`, `records_for()`, `active_hypotheses()`, `ledger_view()`, `to_state()`.
+    - _Requirements: 1.4, 3.1, 3.2, 3.9, 3.12_
+  - [ ] 3.5 Write the minimal LLM layer
+    - `llm/fake.py`: `ScriptedFakeLLM` (FIFO per `(caller, call_kind)`, records every request, synthetic usage `ceil(chars/4)`, `FakeScriptExhausted` naming the caller).
+    - `llm/offline.py`: `OfflineResponder` reading only the `<context>` JSON block. Minimal rules for `plan`, `specialist_step`, `reasoning`, `critic` and `reporting` that yield schema-valid output.
+    - `llm/validator.py`: `StructuredOutputValidator` (JSON extraction, `model_validate(..., context=ctx)`, exactly one repair request listing `loc: msg`, then `StructuredOutputFailure`).
+    - `llm/gateway.py`: `LLMGateway.structured()` and `raw()`, recording usage per caller and an `llm_call` trace event.
+    - _Requirements: 5.3, 5.4, 5.5, 5.6, 5.11, 5.12, 30.4_
+  - [ ] 3.6 Write the minimal state rules
+    - `state/citations.py`: `CitationValidator.validate()` that drops absent Evidence_IDs and orphan Recommended_Actions, records one violation per removal, and labels Fact or Assumption.
+    - `state/confidence.py`: `apply_confidence_policy()` per design.
+    - `state/verdict.py`: `investigator_verdict()` and `baseline_verdict()` including the `complete`, non-historical support condition.
+    - _Requirements: 4.2, 4.3, 4.4, 4.5, 4.6, 17.4, 19.1, 19.2_
+  - [ ] 3.7 Write all six agents in minimal form
+    - Orchestrator: build the Default_Task_Graph (no LLM), run the two Specialist Tasks concurrently with `asyncio.gather`, then Reasoning, one Critic_Round, then Reporting. A Critic request in round 1 ends with `max_critic_rounds` when the round budget is 1 (enough for the slice).
+    - Observability: issue the code-issued opening `query_logs(affected, [start − margin, start + 2h), levels=[WARN, ERROR], limit=25)`, then one findings call.
+    - Dependency: no Tools yet (only `query_logs` exists); return empty findings through the same code path. Tools are wired in 7.3.
+    - Reasoning, Critic, Reporting: one structured call each through the gateway, with outputs committed by the Orchestrator after citation validation.
+    - Minimal prompt templates and builders with the `<context>` block.
+    - _Requirements: 6.7, 7.2, 8.2, 10.1, 11.1, 12.1_
+  - [ ] 3.8 Write the report path
+    - `report/assembler.py`: `ReportAssembler` that copies Verdict, Termination_Reason, Hypotheses with adjusted confidence, Data_Gaps, claims and the Evidence appendix from the Blackboard.
+    - `report/deterministic.py`: `DeterministicReportGenerator` (D7: one `mitigation` only when conclusive, then `further_investigation` per missing-evidence entry, capped).
+    - `report/markdown.py`: `MarkdownRenderer` (all sections, `_No entries._` for empty ones, confidence to 2 decimals).
+    - `report/writer.py`: `FileRunOutputSink` writing `report.json`, `report.md`, `trace.json` and `ledger.json` through the redactor.
+    - _Requirements: 12.2, 12.6, 19.7, 20.1, 20.2, 20.3, 20.4, 21.1, 21.2, 21.7_
+  - [ ] 3.9 Write the minimal Data_Generator
+    - `datagen/`: seeded RNG streams, topology builder, background telemetry and noise, record-ID and incident-ID hashing, canary generation, the `config_regression` Fault_Template, `write_incident()` (temp dir + rename, canonical JSON) to the Snapshot_Root and Answer_Key_Root.
+    - `scenarios/bad-config-deploy.json`.
+    - _Requirements: 22.1, 22.5, 22.7, 22.8, 22.9, 22.11, 22.12, 22.15, 22.16, 23.1, 24.1, 24.5_
+  - [ ] 3.10 Write `cli generate` and `cli investigate`
+    - `cli.py` with argparse. `investigate --incident DIR --system multi --config FILE --out DIR`. Validation order from design "CLI" (argparse, config, root overlap check, path checks). Exit 0 on a written report regardless of Verdict, exit 1 with a redacted message otherwise.
+    - _Requirements: 1.2, 1.3, 21.1, 28.1, 28.2, 28.3, 28.5, 28.7_
+  - [ ] 3.11 Write the thin-slice end-to-end test
+    - `tests/e2e/test_thin_slice.py`: generate `bad-config-deploy` into `tmp_path`, run `investigate --system multi` with `config.fake.toml`, assert all four output files exist, `report.json` validates, every Req 20.1 section is present in both formats, and the canary is absent from every output.
+    - _Requirements: 20.1, 21.1, 24.6_
+
+- [ ] 4. Checkpoint: thin-slice test green, commit on `main`, then create the five worktrees (`ws/tools-data`, `ws/orchestrator-state`, `ws/agents`, `ws/eval-baseline`, `ws/tests`). Ask the user if questions arise.
+
+### Phase 3: Parallel workstreams (one branch each)
+
+All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tests against those interfaces and merges last, after the others (task 10.1).
+
+- [ ] 5. Workstream `ws/tools-data`: tools, failures and the dataset
+  - [ ] 5.1 Write the remaining four tools and their summaries
+    - `query_metrics` (buckets aligned to range start, mean/min/max/count, `constituent_ids`), `get_deployments`, `get_dependencies` (BFS both directions, shortest hop, final-hop edge ID), `search_incidents` (term match over title, summary, symptoms, resolution).
+    - Fill in the per-Tool summary entries and `metric_stats` from design D3.
+    - Source record IDs: record ID followed by its constituents, de-duplicated (D9).
+    - _Requirements: 13.4, 13.5, 13.6, 13.7, 13.10, 3.11_
+  - [ ] 5.2 Write the Failure_Injector
+    - `tools/injector.py`: `outcome()` and `apply()` from design (sha256 key over seed, incident ID, Tool, canonical input, attempt), forced Failure_Profile entries first, random selection only when enabled, no stale-data for `get_dependencies` and `search_incidents`, partial and stale record selection.
+    - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6, 14.7_
+  - [ ] 5.3 Write the Failure_Injector determinism property test
+    - **Property 33: Failure injection is deterministic.** Generate seed, small snapshot, probabilities, Tool, input and attempt. Assert identical outcomes across repeated calls, re-ordered or default-explicit inputs, different callers, and a shuffled and `asyncio.gather`-interleaved sequence of other calls. 25 examples.
+    - **Validates: Requirements 14.2**
+  - [ ] 5.4 Write the Retry_Policy, Circuit_Breaker and full ToolLayer pipeline
+    - `tools/retry.py`: delay `min(cap, b + b·u)` with hash-derived jitter.
+    - `tools/breaker.py`: per-Tool closed/open state, Consecutive_Failure_Count, one Trial_Call after cooldown, `release_trial`.
+    - Update `tools/layer.py`: retry only on `timeout`; breaker and budget checks on every attempt; `circuit_open`, `budget_exhausted` and final `timeout` each record one Data_Gap before returning; `budget_exhausted` signals termination; trace every Tool_Call and rejection.
+    - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7, 15.8, 15.9, 15.10, 15.11, 17.1, 17.7, 18.2_
+  - [ ] 5.5 Write core tool, failure, retry and breaker tests
+    - Each Tool against hand-built snapshots: filters, half-open bounds, truncation order, zero matches.
+    - `invalid_input` makes no Tool_Call, records no Data_Gap and leaves the breaker unchanged.
+    - Injected timeout, partial and stale shapes; forced failure on every attempt; random injection disabled.
+    - Retry: retries only after `timeout`, stops at max attempts, delays match the formula on a FakeClock.
+    - Breaker: opens at the threshold, rejects with `circuit_open`, admits one trial after cooldown, closes on success, reopens on trial timeout, separate state per Tool.
+    - Budget: retries and trials count, rejections do not, `budget_exhausted` at the limit with a Data_Gap.
+    - _Requirements: 13.3, 13.8, 13.9, 13.11, 13.12, 14.3, 14.4, 14.5, 14.6, 14.7, 15.1, 15.3, 15.4, 15.5, 15.6, 15.7, 15.9, 17.1, 18.2_
+  - [ ]* 5.6 Property tests for tools and failures (lower priority)
+    - **Property 30: Tool semantics match a reference model.** **Validates: Requirements 13.3–13.7, 13.9, 13.12, 13.13**
+    - **Property 31: Invalid Tool input is rejected without side effects.** **Validates: Requirements 13.1, 13.8**
+    - **Property 32: Tools are idempotent.** **Validates: Requirements 13.10**
+    - **Property 34: Injected outcomes have the specified shape.** **Validates: Requirements 13.2, 13.11, 14.3–14.5**
+    - **Property 35: Outcome selection rules.** **Validates: Requirements 14.1, 14.6, 14.7**
+    - **Property 38: Retry schedule.** **Validates: Requirements 15.1–15.3**
+    - **Property 39: Circuit_Breaker matches its state-machine model.** **Validates: Requirements 15.4–15.8**
+    - **Property 41: Data_Gaps exactly for failed Tool_Requests.** **Validates: Requirements 17.1, 17.7**
+    - **Property 9: Observation_Summary is deterministic and bounded.** **Validates: Requirements 3.11**
+  - [ ]* 5.7 Failure-type distribution property (lowest priority)
+    - **Property 36: Failure-type distribution.** **Validates: Requirements 14.8**
+  - [ ] 5.8 Write the remaining Fault_Templates, Traps and noise
+    - Templates: `database_failover`, `third_party_outage`, `memory_leak`, `certificate_expiry`, `cache_stampede`, `lb_misconfiguration`, `disk_full`, `connection_pool_exhaustion`, `symptoms_only`, `feature_flag_regression`, `cascading_failure`.
+    - Traps: `unrelated_deploy_near_onset`, `noisy_alerts`, `innocent_config_change`, `traffic_spike`, `disagreeing_monitors`, `lookalike_past_incident`.
+    - `NoiseConstraints` honoured by the noise generator (`no_changes_in_window`, `no_deploys_on_path_to_root`, and others the templates need).
+    - _Requirements: 22.9, 22.10, 22.12, 23.13_
+  - [ ] 5.9 Write the 12 Scenario_Specs and the verification step
+    - `scenarios/*.json` for the 12 rows of the design catalogue table, each naming its `CatalogueCondition`. `logs-timeout` forces `query_logs: timeout`.
+    - `datagen/checks.py`: one condition check per catalogue row (Req 23.1–23.12), the generic checks (Req 22.13), and the leak scan of every Snapshot_Root file (canary, scenario and template names, banned marker words). Any violation raises `GenerationError` and writes nothing.
+    - `generate` writes all 12 scenarios and stops at the first failure.
+    - _Requirements: 22.2, 22.13, 22.17, 23.1–23.12, 23.14, 23.15, 23.16, 24.11, 28.1, 28.8_
+  - [ ] 5.10 Write generator tests
+    - For seed 42, all 12 scenarios generate and pass their checks; two generations are byte-identical; the catalogue covers 12 distinct conditions; a broken spec is rejected with field names and writes nothing.
+    - _Requirements: 22.2, 22.6, 23.14, 23.16_
+  - [ ]* 5.11 Property tests for the generator (lower priority)
+    - **Property 37: Invalid Scenario_Specs and Failure_Profiles are rejected.** **Validates: Requirements 14.9, 22.2**
+    - **Property 50: Scenario_Spec round trip.** **Validates: Requirements 22.3, 22.4**
+    - **Property 51: Generator determinism.** **Validates: Requirements 22.6, 22.11**
+    - **Property 52: Generated incidents satisfy structural invariants.** **Validates: Requirements 22.5, 22.7–22.10, 22.13, 22.15, 22.16, 24.5, 24.11**
+    - **Property 53: Snapshot round trip.** **Validates: Requirements 22.14**
+    - **Property 54: Catalogue conditions hold for every Seed.** **Validates: Requirements 23.1–23.12, 23.15**
+  - [ ] 5.12 Branch checkpoint: tests green on `ws/tools-data`, rebased on `main`.
+
+- [ ] 6. Workstream `ws/orchestrator-state`: Blackboard, scheduling and termination
+  - [ ] 6.1 Complete the Blackboard
+    - Superseded Hypotheses, `record_by_source_id()`, `update_evidence` / `delete_evidence` that always raise `ImmutableEvidenceError`, `from_state()`, and atomic budget increments.
+    - _Requirements: 3.7, 3.8, 3.9, 3.10, 3.12_
+  - [ ] 6.2 Write the Blackboard concurrent-append property test
+    - **Property 6: Concurrent writes are never lost.** For N (1–200) concurrent `append_evidence` calls and M concurrent usage increments run with `asyncio.gather`, assert exactly N new items with N distinct IDs and usage rising by the exact sum. 25 examples.
+    - **Validates: Requirements 3.8**
+  - [ ] 6.3 Complete the Citation_Validator and write the Support_Check
+    - Claim-status rule: a `verified` or `contradicted` update without a remaining non-historical citation restores the whole prior claim record with a violation (Req 1.6, 1.7, 4.8).
+    - `state/support.py`: `SupportCheck.supports()` with the D2 predicates and rule table.
+    - _Requirements: 1.6, 1.7, 4.1, 4.4, 4.5, 4.6, 4.7, 27.4_
+  - [ ] 6.4 Write the Citation_Validator tests
+    - **Property 13: Citation validation is idempotent.** Generate outputs, ledgers, Hypothesis ID sets and prior claim statuses; assert `validate(validate(x)) == validate(x)` and zero new violations. 25 examples.
+    - **Validates: Requirements 4.8**
+    - Example tests: absent-ID removal keeps order; orphan Recommended_Action removed; Fact vs Assumption labels; historical-only `verified` update rejected; identical results for Investigator and Baseline producers.
+    - _Requirements: 1.6, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
+  - [ ] 6.5 Write the TaskGraph and planner
+    - `orchestrator/graph.py`: `add`, `ready` (insertion order), `transition` with only the allowed edges, `validate_plan` (cycles, self-loops, duplicates, dangling deps, wrong structure), `default()`.
+    - `orchestrator/planner.py`: one `plan` LLM call; on a plan defect or a failed call, use the Default_Task_Graph and record a `plan_fallback` trace event with the cause.
+    - _Requirements: 6.1, 6.3, 6.4, 6.7, 6.8, 6.9_
+  - [ ] 6.6 Write the Scheduler
+    - `orchestrator/scheduler.py`: event-driven `_pump()` on graph creation, task add and task terminal; starts Ready_Tasks while running < concurrency limit; Reporting gated on loop end; each attempt runs under `clock.wait_for(per_task_timeout_s)`; one retry on Agent_Failure in the running state; second failure → failed + Data_Gap; a failure never cancels other running Tasks; every transition traced.
+    - _Requirements: 6.2, 6.5, 6.6, 7.1, 7.3, 7.5, 16.1, 16.2, 16.5, 16.6_
+  - [ ] 6.7 Write the CriticLoop
+    - `orchestrator/critic_loop.py`: no Hypotheses → cancel the Critic Task, `no_hypotheses`; round counter at dispatch (retry keeps the round); acceptance → `critic_accepted`; requests in the last round → `max_critic_rounds`; dedupe against completed Evidence_Request Tasks and earlier requests in the round (canonical params); all duplicates → `duplicate_requests_only`; otherwise create Specialist Tasks, one Reasoning Task and one Critic Task; trace every discard.
+    - _Requirements: 10.4, 11.7, 11.8, 11.9, 11.10, 11.11, 11.12, 11.13, 11.14, 16.3, 16.7_
+  - [ ] 6.8 Write termination, budgets and the loop-end sequence
+    - `orchestrator/termination.py`: `TerminationArbiter` with the D13 check points and the Req 18.7 order, recording one reason once.
+    - `LLMGateway` budget gate: non-Reporting calls stop at `tokens − reserve`, all calls stop at `tokens`; `BudgetBlocked` and `RunClosed` are cancellations, not Agent_Failures.
+    - Watchdog on the Clock: close the ToolLayer and gateway, cancel every Task, finish the loop-end steps, build the DRG report and write it.
+    - Loop end in order: cancel non-Reporting Tasks; Data_Gaps for unfulfilled Evidence_Requests; usage snapshot; Confidence_Policy once; Verdict once; choose the report path (timeout → DRG; reserve short → cancel Reporting, DRG; else Reporting with one retry, failure → `after_verdict` gap and DRG).
+    - `orchestrator/run.py`: `run_investigator()` wiring everything, with the config and termination trace events.
+    - _Requirements: 12.6, 12.7, 16.4, 17.2, 17.3, 17.4, 17.10, 17.11, 18.1, 18.3, 18.4, 18.5, 18.6, 18.7, 18.8, 18.9, 18.10, 19.6, 29.5, 29.6_
+  - [ ] 6.9 Write task-graph and dispatch tests
+    - Plan validation rejects a cycle, a duplicate ID and a dangling dependency and falls back with a trace event; illegal transitions raise; dispatch order is topological; the running count never exceeds the limit; with limit ≥ 2 both initial Specialists start before either finishes; with limit 1 they run one at a time; one Task failing leaves the others running.
+    - _Requirements: 6.2, 6.3, 6.4, 6.6, 6.8, 6.9, 7.1, 7.2, 7.3, 7.5_
+  - [ ]* 6.10 Property tests for state and orchestration (lower priority)
+    - **Property 5: Evidence is immutable.** **Validates: Requirements 3.7**
+    - **Property 7: Hypothesis revisions are append-only and contiguous.** **Validates: Requirements 3.9**
+    - **Property 8: Blackboard round trip.** **Validates: Requirements 3.10**
+    - **Property 10: Retained-record lookup.** **Validates: Requirements 3.12**
+    - **Property 11: Citation validation labels and removals.** **Validates: Requirements 1.6, 1.7, 4.2–4.6, 12.3**
+    - **Property 12: Citation validation is producer-independent.** **Validates: Requirements 4.7**
+    - **Property 14: LLM gateway accounting and budget gate.** **Validates: Requirements 5.3, 18.3, 18.4**
+    - **Property 18: Plan validation.** **Validates: Requirements 6.1, 6.3**
+    - **Property 19: Scheduler trace invariants.** **Validates: Requirements 6.2, 6.5, 6.6, 6.9, 7.1, 7.3**
+    - **Property 27: Critic loop graph growth and unfulfilled requests.** **Validates: Requirements 10.4, 11.7–11.9, 17.3**
+    - **Property 28: Evidence_Request de-duplication.** **Validates: Requirements 11.10**
+    - **Property 43: Confidence_Policy.** **Validates: Requirements 17.4, 17.5**
+    - **Property 44: Termination precedence.** **Validates: Requirements 18.7**
+    - **Property 45: Verdict rules.** **Validates: Requirements 16.4, 19.1, 19.2, 25.5**
+  - [ ] 6.11 Branch checkpoint: tests green on `ws/orchestrator-state`, rebased on `main`.
+
+- [ ] 7. Workstream `ws/agents`: agents, prompts and the OpenAI adapter
+  - [ ] 7.1 Write the prompt templates and builders
+    - `agents/prompts/`: one constant Prompt_Template per agent plus a builder that renders run-time content and one `<context>` JSON block, per the design prompt table.
+    - Reasoning and Critic builders include each Evidence_Item's ID, Tool, canonical query, reliability and Observation_Summary, and never retained records.
+    - Observability, Dependency and Baseline templates tell the model to set `limit` ≤ 25 and use the Tool's filters on every request.
+    - No scenario names, template names or answer-specific Components in any template.
+    - _Requirements: 10.7, 11.15, 24.8_
+  - [ ] 7.2 Complete the Observability_Agent
+    - Code-issued opening requests (`query_logs` with `limit=25`; `query_metrics(error_rate, step_seconds=600, limit=25)`); for Evidence_Request Tasks, the suggested Tool and params first; then the `specialist_step` loop until the step limit or findings; every Tool_Request counts as one step; error Observations go back to the loop and never raise; step schema `tool` is a `Literal` of the agent's own Tools; context validators for claim shape (one service, one signal, onset or no-onset, ≥ 1 Evidence_ID).
+    - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 17.8_
+  - [ ] 7.3 Complete the Dependency_Agent
+    - Give it `get_deployments`, `get_dependencies` and `search_incidents`. Code-issued opening requests (`get_deployments(affected, [start − change_lookback, start), all change types, limit=25)`; `get_dependencies(affected, depth=5, limit=25)`); suggested request first for Evidence_Request Tasks; same step loop; context validators for finding type, event time and the historical rule.
+    - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8_
+  - [ ] 7.4 Complete the Reasoning_Agent
+    - Context validators: 2–5 Hypotheses, unique Root_Cause_Labels, Components in the dependency map, ranks 1..N with non-increasing confidence, no ID in both lists, a status for every claim.
+    - After citation validation, code assigns Hypothesis IDs by label (reuse or new) and forces `evidence_sufficient = false` without `complete`, non-historical support.
+    - _Requirements: 1.5, 10.1, 10.2, 10.3, 10.5, 10.6, 10.8, 10.9_
+  - [ ] 7.5 Complete the Critic_Agent
+    - Context validators: exactly one of acceptance or 1..max requests; acceptance names the rank-1 ID; target/Tool fit; params parse into the Tool input model; acceptance rejected when rank-1 support is historical-only or only `partial`/`stale`; a `historical_only_support` or `low_reliability_support` request is required in those cases.
+    - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.16, 11.17_
+  - [ ] 7.6 Complete the Reporting_Agent and planner prompt
+    - Reporting context validators: each action names one Blackboard Hypothesis, one category, ≥ 1 Evidence_ID unless `further_investigation`, at most the configured maximum. The report keeps the Orchestrator's Verdict and Termination_Reason unchanged.
+    - Planner prompt and `PlanOutput` context rules.
+    - _Requirements: 6.1, 12.1, 12.2, 12.3, 12.4, 12.5, 19.7_
+  - [ ] 7.7 Complete the OfflineResponder
+    - All design D4 rules for `plan`, `specialist_step`, `reasoning` (generic Component scoring and keyword cause table), `critic` (Req 11.6 and 11.17 rules first), `reporting` and `baseline_step` (fixed probe sequence, then a final answer). Every emitted Tool request uses `limit` ≤ 25. It reads only the `<context>` block and imports nothing from `datagen` or `evaluation`.
+    - _Requirements: 5.11, 24.8_
+  - [ ] 7.8 Write the OpenAI adapter and the retrying client
+    - `llm/openai.py`: `AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"], max_retries=0)`; JSON output mode; map `usage.prompt_tokens` / `completion_tokens` to `TokenCount`; map SDK errors to `LLMErrorCategory` with redacted messages.
+    - Before writing it, check the current OpenAI docs for `gpt-5.4-mini`: whether it accepts `temperature`, whether it needs `max_completion_tokens` instead of `max_tokens`, and whether Chat Completions or the Responses API is the right endpoint. Record the choice in a code comment and the README.
+    - `llm/retrying.py`: `RetryingLLMClient` (retry `RATE_LIMIT`, `SERVER`, `TIMEOUT`; per-attempt `clock.wait_for`; doubling delay capped).
+    - `build_llm_client(config, clock, env)` selects `openai` or `fake`; `anthropic` raises a clear "not built" error unless 7.9 is done.
+    - _Requirements: 5.1, 5.2, 5.3, 5.7, 5.8, 5.9, 5.10_
+  - [ ]* 7.9 Write the Anthropic adapter (optional)
+    - `llm/anthropic.py`: `AsyncAnthropic(max_retries=0)`, map `usage.input_tokens` / `output_tokens`, error mapping, key from `ANTHROPIC_API_KEY`. If skipped, list Req 5.1 and 5.2 (Anthropic part) under README Incomplete Functionality.
+    - _Requirements: 5.1, 5.2_
+  - [ ]* 7.10 Agent and LLM-layer tests (lower priority)
+    - Repair path, retry schedule with a FakeClock, OpenAI adapter request shape with a stubbed transport, step limit and error tolerance, code-issued requests.
+    - **Property 15: One repair, then failure.** **Validates: Requirements 5.4–5.6**
+    - **Property 16: LLM retry schedule.** **Validates: Requirements 5.7, 5.8**
+    - **Property 20: Code-issued Tool_Requests.** **Validates: Requirements 8.2, 8.7, 9.2, 9.6, 9.7**
+    - **Property 21: Step limit and error tolerance.** **Validates: Requirements 8.4–8.6, 9.5, 9.8, 17.8**
+    - **Property 22: Reasoning output validation.** **Validates: Requirements 1.5, 10.1–10.3, 10.5**
+    - **Property 23: Critic output validation.** **Validates: Requirements 11.1–11.6, 11.16, 11.17**
+    - **Property 24: Specialist, Reporting and Baseline output validation.** **Validates: Requirements 8.3, 9.3, 9.4, 12.1, 12.4, 25.7**
+    - **Property 25: Reasoning and Critic prompts carry summaries, not records.** **Validates: Requirements 10.7, 11.15**
+    - **Property 26: Hypothesis identity and sufficiency are code-enforced.** **Validates: Requirements 10.8, 10.9**
+  - [ ] 7.11 Branch checkpoint: tests green on `ws/agents`, rebased on `main`.
+
+- [ ] 8. Workstream `ws/eval-baseline`: baseline, Evaluator and `cli eval`
+  - [ ] 8.1 Write the ReAct Baseline_Agent
+    - `baseline/react.py`: claims recorded as `unverified`; sequential `baseline_step` loop while budgets and the timeout allow; one Tool_Request or a final answer per step; the same Observation format as the Specialists; one retry per failed step, then a Data_Gap and `baseline_failed`; final answer → Citation_Validator → Confidence_Policy → `baseline_verdict` → ReportAssembler with `final_answer`; budget or timeout stops → DRG within 5 s with the matching reason. Uses its own Blackboard as the Run_Ledger and the same config fields as the Investigator.
+    - _Requirements: 25.1, 25.2, 25.3, 25.4, 25.5, 25.6, 25.7, 25.8, 25.9, 25.10_
+  - [ ] 8.2 Write the Evaluator runner
+    - `evaluation/runner.py`: `run_seed()` from design; sequential Runs ordered by scenario, run index, multi before baseline; per-Run outputs under `out/runs/<scenario>/<system>/run-<k>/`; latency from Run start to the JSON write; any exception → failed `RunScore`, then continue; `IsolationScanner` over each Run's artifacts.
+    - The Evaluator is the only non-test code that reads the Answer_Key_Root, and it passes Runs only `InvestigatorConfig`, the snapshot path and the Incident_Report.
+    - _Requirements: 24.4, 24.7, 26.1, 26.2, 26.3, 26.4, 26.7, 26.10, 27.6_
+  - [ ] 8.3 Write the scoring and metrics
+    - `evaluation/metrics.py`: `score_run()` (pure) with top-1, top-3, the match rule, citation precision V/C via the Support_Check (0.0 for no citations or a failed Run), Key_Evidence recall F/K (n/a when K = 0), Tool_Call count from the trace, token counts, expected Data_Gap matches (same source and reason), ranking hit@3, and the over-cautious and over-confident indicators.
+    - _Requirements: 27.1, 27.2, 27.3, 27.4, 27.5, 27.6, 27.7, 27.9, 27.10, 27.11, 27.12, 27.13, 27.14, 27.15, 27.16_
+  - [ ] 8.4 Write aggregation and the Results_Table
+    - `aggregate()`: per scenario × system and pooled "ALL" rows; mean ± `statistics.stdev` (0.0 for one value); failed Runs in top-1, top-3 and hit@3, excluded from the other metrics; rates over non-failed Runs; unavailable and n/a cells.
+    - `render_results_markdown()` with accuracy, grounding, cost and a separate diagnostics group; JSON with identical values and header fields (provider, model, Seed, Run count, date, exact command, failed-Run counts).
+    - _Requirements: 26.5, 26.9, 27.8, 27.17, 31.6_
+  - [ ] 8.5 Write `cli eval` and `investigate --system baseline`
+    - `eval --config FILE --out DIR [--scenario NAME ...] [--system multi|baseline] [--runs 1..10]` with option validation before any Run; API-key presence check for `openai`.
+    - Wire `--system baseline` into `investigate`.
+    - _Requirements: 26.6, 26.8, 28.2, 28.4, 28.5, 28.6_
+  - [ ] 8.6 Write scoring-rule tests
+    - Top-1 and top-3 for all four combinations of key outcome × Verdict; Component case and whitespace variants; fewer than 3 Hypotheses; failed Runs; hit@3 regardless of Verdict and n/a for the insufficient marker; over-cautious and over-confident indicators; citation precision with zero citations; recall n/a; aggregation with an all-failed cell.
+    - _Requirements: 26.9, 27.1, 27.2, 27.3, 27.4, 27.5, 27.10, 27.11, 27.12, 27.13, 27.14, 27.15, 27.16, 27.17_
+  - [ ]* 8.7 Property tests for evaluation (lower priority)
+    - **Property 58: Run Seed derivation.** **Validates: Requirements 26.2**
+    - **Property 59: Scoring rules.** **Validates: Requirements 27.1–27.3, 27.13–27.16**
+    - **Property 60: Citation precision and Key_Evidence recall.** **Validates: Requirements 27.4, 27.5, 27.10–27.12**
+    - **Property 61: Scoring is deterministic.** **Validates: Requirements 27.7, 27.9**
+    - **Property 62: Aggregation.** **Validates: Requirements 26.9, 27.8, 27.17**
+    - **Property 63: Results_Table Markdown matches JSON.** **Validates: Requirements 26.5**
+  - [ ] 8.8 Branch checkpoint: tests green on `ws/eval-baseline`, rebased on `main`.
+
+- [ ] 9. Workstream `ws/tests`: cross-cutting tests
+  - [ ] 9.1 Write the scripted-run harness
+    - `tests/harness.py`: builds `RunDependencies` from a `ScriptedFakeLLM` script, a `FakeClock`, a generated or hand-built snapshot and a config override; runs either system into a temp sink; returns the report, trace, ledger and recorded prompts.
+    - _Requirements: 30.1, 30.4, 30.5_
+  - [ ] 9.2 Write one Investigator Run per Termination_Reason
+    - `critic_accepted`, `max_critic_rounds`, `duplicate_requests_only`, `tool_call_budget_exhausted`, `token_budget_exhausted`, `wall_clock_timeout` (DRG, no LLM call after the timeout), `critic_failed`, `no_hypotheses`. Each asserts exactly one report and that the report and trace both carry the reason.
+    - _Requirements: 11.12, 11.13, 16.3, 16.7, 18.5, 18.6, 18.7, 18.9, 30.6_
+  - [ ] 9.3 Write the Baseline Termination_Reason runs
+    - `final_answer`, `baseline_failed`, and one budget or timeout stop. Same assertions as 9.2.
+    - _Requirements: 25.4, 25.6, 25.9, 30.6_
+  - [ ] 9.4 Write the inconclusive-path and Verdict-rule tests
+    - Direct tests of `investigator_verdict` and `baseline_verdict` over constructed states with exactly one condition unmet, including the four supporting-evidence variants (absent from the ledger, `partial`, `stale`, historical).
+    - One end-to-end Investigator Run with no Hypotheses: inconclusive, ranked list empty, missing-evidence list present.
+    - A Run with a forced Tool failure: the Data_Gap is listed and confidence is lowered by the penalty.
+    - _Requirements: 16.4, 17.4, 17.6, 19.1, 19.2, 19.3, 19.5, 25.5, 30.7_
+  - [ ] 9.5 Write the Critic feedback and parallel-dispatch end-to-end tests
+    - A round-1 request for both Specialists runs both resulting Tasks concurrently, a new Reasoning revision follows, and round 2 accepts. A duplicate request is discarded with a trace event.
+    - _Requirements: 7.4, 10.4, 11.7, 11.8, 11.9, 11.10, 11.11_
+  - [ ] 9.6 Write the canary isolation test across all 12 scenarios
+    - For each catalogue scenario (seed 42), one Investigator Run and one Baseline Run with the OfflineResponder. Assert no canary (any case) and no Answer_Key_Root path in any recorded prompt, Observation, Blackboard or ledger state, the trace or either report. Assert the Snapshot_Root is unchanged.
+    - _Requirements: 2.5, 24.6, 24.7, 30.8_
+  - [ ] 9.7 Write the static isolation checks
+    - AST import-boundary test (only `cli` imports `evaluation`; investigator packages import neither `datagen` nor `evaluation` nor answer-key or scenario models; the OfflineResponder imports neither).
+    - Scan investigator string constants and prompt templates for scenario names and template names.
+    - Basic path check: a snapshot path outside the Snapshot_Root is rejected without reading; overlapping roots are rejected by the CLI.
+    - _Requirements: 24.3, 24.4, 24.8, 24.9, 24.10_
+  - [ ]* 9.8 Cross-cutting property and trace tests (lower priority)
+    - **Property 2: Initial claims.** **Validates: Requirements 1.4, 25.8**
+    - **Property 3: Snapshot_Root is unchanged by runs.** **Validates: Requirements 2.5**
+    - **Property 4: Successful Tool_Requests append exactly one Evidence_Item.** **Validates: Requirements 3.2–3.6, 25.3, 25.10**
+    - **Property 17: Secrets never leak.** **Validates: Requirements 5.10, 31.11**
+    - **Property 29: Report assembly fidelity.** **Validates: Requirements 1.8, 12.2, 17.6, 17.9, 17.11, 19.3, 19.5, 19.7, 20.2–20.7**
+    - **Property 40: Tool_Call accounting and budget limits.** **Validates: Requirements 11.14, 15.9, 15.10, 18.2, 18.10**
+    - **Property 42: Every Run ends with exactly one report.** **Validates: Requirements 16.2, 17.2, 18.9**
+    - **Property 46: Markdown completeness.** **Validates: Requirements 21.3, 21.7**
+    - **Property 48: Invalid report files are rejected with field paths.** **Validates: Requirements 21.5**
+    - **Property 57: Answer-key isolation** (generated seeds, beyond the seed-42 example test). **Validates: Requirements 24.6, 30.8**
+    - **Property 65: Trace completeness.** **Validates: Requirements 29.3, 29.4**
+    - Per-criterion traceability test for Req 30.2.
+  - [ ]* 9.9 Filesystem and byte-sync properties (lowest priority)
+    - **Property 49: Markdown sync.** **Validates: Requirements 21.8**
+    - **Property 55: Path guard with symlinks.** **Validates: Requirements 24.3**
+    - **Property 56: Root disjointness.** **Validates: Requirements 24.10**
+  - [ ] 9.10 Branch checkpoint: tests written; tests that need unmerged workstreams may fail on this branch until it is rebased after task 10.1. Do not merge before then.
+
+### Phase 4: Integration (`main`)
+
+- [ ] 10. Integrate, then write the documentation
+  - [ ] 10.1 Merge the workstreams
+    - Merge order: `ws/tools-data` → `ws/orchestrator-state` → `ws/agents` → `ws/eval-baseline` → `ws/tests`. Before each merge, rebase the branch on `main` and run its tests; after each merge, run the full suite on `main`. Fix failures on the branch, not on `main`.
+    - _Requirements: 30.1_
+  - [ ] 10.2 Run the full suite
+    - `pytest` on `main` with no API key and no network: green, under 120 s. Record the wall time.
+    - _Requirements: 30.1, 30.5_
+  - [ ] 10.3 Run an offline CLI smoke test
+    - `generate --seed 42`, then `investigate` with `config.fake.toml` for both systems on all 12 snapshots. Check every Run writes the four output files and exits 0.
+    - _Requirements: 28.1, 28.2, 28.3_
+  - [ ] 10.4 Write the README
+    - Setup (Python 3.11+, install command, `OPENAI_API_KEY`, every config field with its default, example `generate`, `investigate`, `eval` and `pytest` commands); Architecture (the design Mermaid component diagram and an explanation of coordination: Blackboard, Task_Graph, parallel dispatch, Critic feedback loop, budgets and every Termination_Reason); External Dependencies (OpenAI key, no key for tests or the fake provider, every pinned package and version); Deliverables index (transcript, both Results_Tables, scenarios, tests, `TECHNICAL_NOTE.md`, `ASSUMPTIONS.md`); Incomplete Functionality (task 10.6).
+    - State that `provider = "fake"` results are smoke results that do not measure real accuracy.
+    - _Requirements: 31.1, 31.2, 31.4, 31.5, 31.7_
+  - [ ] 10.5 Write `TECHNICAL_NOTE.md`
+    - At most 500 words, with sections Key Decisions, Trade-offs, Limitations and Potential Improvements. Limitations must state that the Confidence_Policy applies one uniform per-Data_Gap penalty to every Hypothesis regardless of the Data_Gap's relevance to that Hypothesis, and that OfflineResponder results do not measure real accuracy.
+    - _Requirements: 31.3, 31.9_
+  - [ ] 10.6 Compile the Incomplete Functionality list
+    - Walk through Requirements 1–31 and list, by number, every criterion not implemented or only partly implemented (for example the full Req 30.2 per-criterion coverage, the Req 30.3 properties not written, Req 14.8, 21.8, the full 24.3 and 24.10 hardening, every untested config bound, the Anthropic adapter if skipped, Req 31.12 if the fresh-clone check is not run), plus every optional task not done.
+    - _Requirements: 31.4_
+  - [ ] 10.7 Write the doc-lint test
+    - README has the five required sections and one `mermaid` fence; `TECHNICAL_NOTE.md` has the four headings, ≤ 500 whitespace-separated words and the uniform-penalty sentence; every `pyproject.toml` dependency uses `==`; every README Deliverables path exists.
+    - _Requirements: 31.1, 31.2, 31.3, 31.7, 31.8_
+
+- [ ] 11. Checkpoint: full suite green on `main` (no key, no network, < 120 s), docs written. Ask the user if questions arise.
+
+### Phase 5: Evaluation run
+
+- [ ] 12. Run the evaluation and finish the deliverables
+  - [ ] 12.1 Run the offline smoke evaluation
+    - `incident-investigator eval --config config.fake.toml --out results/offline-smoke` (12 scenarios × 3 runs × 2 systems). Check that the Results_Table has every row, no isolation violations and a failed-Run count of zero. Commit it as a pipeline check, labelled as not measuring real accuracy.
+    - _Requirements: 26.1, 26.5, 31.10_
+  - [ ] 12.2 Run the real evaluation with OpenAI `gpt-5.4-mini`
+    - Requires `OPENAI_API_KEY` and incurs API cost. Do not start it without the user's explicit confirmation.
+    - First run one scenario × 1 run per system, report the measured tokens per Run and an estimated total cost for 72 Runs, and ask the user to confirm.
+    - After confirmation: `incident-investigator eval --config config.toml --out results/` and commit the Markdown and JSON Results_Tables and per-Run outputs. The table records the command, date (YYYY-MM-DD), Seed, provider and model.
+    - Scan every committed results file for the API key value.
+    - _Requirements: 26.1, 26.4, 26.5, 31.6, 31.11_
+  - [ ] 12.3 Update the README with the results
+    - Add a short results summary that compares both systems on accuracy, grounding, cost and the diagnostics. If only the offline run exists, or any Runs failed, list the shortfall under Incomplete Functionality.
+    - _Requirements: 31.6, 31.10_
+  - [ ] 12.4 Add the coding-assistant transcript
+    - Create `transcripts/README.md` stating what belongs there. Ask the user to export the session transcript into `transcripts/` (the assistant cannot export its own transcript). Then scan the transcript for API key values and update the README Deliverables path.
+    - _Requirements: 31.7, 31.11_
+
+- [ ] 13. Final checkpoint: full suite green, Results_Table committed, transcript in place, README Incomplete Functionality current. Ask the user if questions arise.
+
+## Notes
+
+- Tasks marked `*` are optional and lower priority. If they are not done, list them under README Incomplete Functionality.
+- Property tests use the `ci` Hypothesis profile (25 examples, derandomized) and the comment tag `# Feature: incident-investigator, Property N: <title>`.
+- No test may call the network, read an API key or wait on the real clock.
+- Answer_Keys are read only by `evaluation` and by tests. No investigator code, prompt or config passed to a Run contains a scenario name, an answer-key path or a canary.

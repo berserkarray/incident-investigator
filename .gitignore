@@ -1,0 +1,17 @@
+.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Test and tool caches
+.pytest_cache/
+.hypothesis/
+
+# Local run outputs (committed results live under results/)
+runs/

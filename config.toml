@@ -1,0 +1,56 @@
+# Incident Investigator configuration (real runs).
+# The API key is read only from the OPENAI_API_KEY environment variable.
+# Durations are in seconds. Relative paths resolve against this file's directory.
+
+seed = 42
+
+[llm]
+provider = "openai"
+model = "gpt-5.4-mini"
+request_timeout_s = 60
+max_attempts = 3
+base_delay_s = 1.0
+max_delay_s = 20.0
+
+[tools.retry]
+max_attempts = 3
+base_delay_s = 0.5
+max_delay_s = 8.0
+
+[tools.circuit_breaker]
+failure_threshold = 3
+cooldown_s = 30
+
+[tools.failure_injection]
+random_enabled = true
+timeout_p = 0.05
+partial_p = 0.05
+stale_p = 0.05
+
+[orchestrator]
+concurrency_limit = 4
+per_task_step_limit = 6
+per_task_timeout_s = 180
+pre_incident_margin_s = 3600
+change_lookback_s = 604800
+max_initial_tasks_per_specialist = 2
+max_evidence_requests_per_round = 4
+
+[budgets]
+critic_rounds = 3
+tool_calls = 60
+tokens = 400000
+wall_clock_timeout_s = 900
+reporting_reserve_tokens = 20000
+
+[policy]
+data_gap_penalty = 0.05
+conclusive_threshold = 0.6
+
+[report]
+max_recommended_actions = 6
+observation_summary_size = 5
+
+[paths]
+snapshot_root = "data/snapshots"
+answer_key_root = "data/answer_keys"

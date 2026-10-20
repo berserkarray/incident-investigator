@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools==84.2.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "incident-investigator"
+version = "0.1.0"
+description = "Multi-agent production incident investigator with a single-agent ReAct baseline"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic==2.14.1",
+    "openai==3.35.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "hypothesis==6.170.5",
+]
+
+[project.scripts]
+incident-investigator = "incident_investigator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra"
+markers = [
+    "real_clock: allow real non-zero sleeps (SystemClock tests only)",
+]
