@@ -215,40 +215,40 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 54: Catalogue conditions hold for every Seed.** **Validates: Requirements 23.1–23.12, 23.15**
   - [ ] 5.12 Branch checkpoint: tests green on `ws/tools-data`, rebased on `main`.
 
-- [ ] 6. Workstream `ws/orchestrator-state`: Blackboard, scheduling and termination
-  - [ ] 6.1 Complete the Blackboard
+- [x] 6. Workstream `ws/orchestrator-state`: Blackboard, scheduling and termination
+  - [x] 6.1 Complete the Blackboard
     - Superseded Hypotheses, `record_by_source_id()`, `update_evidence` / `delete_evidence` that always raise `ImmutableEvidenceError`, `from_state()`, and atomic budget increments.
     - _Requirements: 3.7, 3.8, 3.9, 3.10, 3.12_
-  - [ ] 6.2 Write the Blackboard concurrent-append property test
+  - [x] 6.2 Write the Blackboard concurrent-append property test
     - **Property 6: Concurrent writes are never lost.** For N (1–200) concurrent `append_evidence` calls and M concurrent usage increments run with `asyncio.gather`, assert exactly N new items with N distinct IDs and usage rising by the exact sum. 25 examples.
     - **Validates: Requirements 3.8**
-  - [ ] 6.3 Complete the Citation_Validator and write the Support_Check
+  - [x] 6.3 Complete the Citation_Validator and write the Support_Check
     - Claim-status rule: a `verified` or `contradicted` update without a remaining non-historical citation restores the whole prior claim record with a violation (Req 1.6, 1.7, 4.8).
     - `state/support.py`: `SupportCheck.supports()` with the D2 predicates and rule table.
     - _Requirements: 1.6, 1.7, 4.1, 4.4, 4.5, 4.6, 4.7, 27.4_
-  - [ ] 6.4 Write the Citation_Validator tests
+  - [x] 6.4 Write the Citation_Validator tests
     - **Property 13: Citation validation is idempotent.** Generate outputs, ledgers, Hypothesis ID sets and prior claim statuses; assert `validate(validate(x)) == validate(x)` and zero new violations. 25 examples.
     - **Validates: Requirements 4.8**
     - Example tests: absent-ID removal keeps order; orphan Recommended_Action removed; Fact vs Assumption labels; historical-only `verified` update rejected; identical results for Investigator and Baseline producers.
     - _Requirements: 1.6, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
-  - [ ] 6.5 Write the TaskGraph and planner
+  - [x] 6.5 Write the TaskGraph and planner
     - `orchestrator/graph.py`: `add`, `ready` (insertion order), `transition` with only the allowed edges, `validate_plan` (cycles, self-loops, duplicates, dangling deps, wrong structure), `default()`.
     - `orchestrator/planner.py`: one `plan` LLM call; on a plan defect or a failed call, use the Default_Task_Graph and record a `plan_fallback` trace event with the cause.
     - _Requirements: 6.1, 6.3, 6.4, 6.7, 6.8, 6.9_
-  - [ ] 6.6 Write the Scheduler
+  - [x] 6.6 Write the Scheduler
     - `orchestrator/scheduler.py`: event-driven `_pump()` on graph creation, task add and task terminal; starts Ready_Tasks while running < concurrency limit; Reporting gated on loop end; each attempt runs under `clock.wait_for(per_task_timeout_s)`; one retry on Agent_Failure in the running state; second failure → failed + Data_Gap; a failure never cancels other running Tasks; every transition traced.
     - _Requirements: 6.2, 6.5, 6.6, 7.1, 7.3, 7.5, 16.1, 16.2, 16.5, 16.6_
-  - [ ] 6.7 Write the CriticLoop
+  - [x] 6.7 Write the CriticLoop
     - `orchestrator/critic_loop.py`: no Hypotheses → cancel the Critic Task, `no_hypotheses`; round counter at dispatch (retry keeps the round); acceptance → `critic_accepted`; requests in the last round → `max_critic_rounds`; dedupe against completed Evidence_Request Tasks and earlier requests in the round (canonical params); all duplicates → `duplicate_requests_only`; otherwise create Specialist Tasks, one Reasoning Task and one Critic Task; trace every discard.
     - _Requirements: 10.4, 11.7, 11.8, 11.9, 11.10, 11.11, 11.12, 11.13, 11.14, 16.3, 16.7_
-  - [ ] 6.8 Write termination, budgets and the loop-end sequence
+  - [x] 6.8 Write termination, budgets and the loop-end sequence
     - `orchestrator/termination.py`: `TerminationArbiter` with the D13 check points and the Req 18.7 order, recording one reason once.
     - `LLMGateway` budget gate: non-Reporting calls stop at `tokens − reserve`, all calls stop at `tokens`; `BudgetBlocked` and `RunClosed` are cancellations, not Agent_Failures.
     - Watchdog on the Clock: close the ToolLayer and gateway, cancel every Task, finish the loop-end steps, build the DRG report and write it.
     - Loop end in order: cancel non-Reporting Tasks; Data_Gaps for unfulfilled Evidence_Requests; usage snapshot; Confidence_Policy once; Verdict once; choose the report path (timeout → DRG; reserve short → cancel Reporting, DRG; else Reporting with one retry, failure → `after_verdict` gap and DRG).
     - `orchestrator/run.py`: `run_investigator()` wiring everything, with the config and termination trace events.
     - _Requirements: 12.6, 12.7, 16.4, 17.2, 17.3, 17.4, 17.10, 17.11, 18.1, 18.3, 18.4, 18.5, 18.6, 18.7, 18.8, 18.9, 18.10, 19.6, 29.5, 29.6_
-  - [ ] 6.9 Write task-graph and dispatch tests
+  - [x] 6.9 Write task-graph and dispatch tests
     - Plan validation rejects a cycle, a duplicate ID and a dangling dependency and falls back with a trace event; illegal transitions raise; dispatch order is topological; the running count never exceeds the limit; with limit ≥ 2 both initial Specialists start before either finishes; with limit 1 they run one at a time; one Task failing leaves the others running.
     - _Requirements: 6.2, 6.3, 6.4, 6.6, 6.8, 6.9, 7.1, 7.2, 7.3, 7.5_
   - [ ]* 6.10 Property tests for state and orchestration (lower priority)
@@ -266,7 +266,14 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 43: Confidence_Policy.** **Validates: Requirements 17.4, 17.5**
     - **Property 44: Termination precedence.** **Validates: Requirements 18.7**
     - **Property 45: Verdict rules.** **Validates: Requirements 16.4, 19.1, 19.2, 25.5**
-  - [ ] 6.11 Branch checkpoint: tests green on `ws/orchestrator-state`, rebased on `main`.
+  - [x] 6.11 Branch checkpoint: tests green on `ws/orchestrator-state`, rebased on `main`.
+
+  - Notes from the orchestrator workstream (for integration):
+    - `orchestrator/run.py` still builds the `ToolLayer` with the placeholder injector, breaker and retry. Wire the 5.2 and 5.4 components into `InvestigatorRun._setup()` when `ws/tools-data` is merged; keep `termination=_DeferredToolSignal(...)` so the budget check runs after the Tool_Result and its Data_Gap.
+    - The planner falls back with cause `llm_failed` on every offline Run until the OfflineResponder gets its `plan` rule (7.7). The plan prompt is a minimal builder in `orchestrator/planner.py`; 7.6 owns its final text.
+    - Evaluator API (8.3): `state/support.py` `SupportCheck.supports(stmt, evidence_item, records)`, where `stmt` is an `ObservabilityClaim`, `DependencyClaim`, `ClaimDraft`, `HypothesisCitation` (supporting, contradicting, or a Recommended_Action via its Hypothesis) or `IncidentClaimCitation`. The free-text rule also requires CURRENT, following the design note that Historical_Evidence supports only past-incident claims.
+    - The trace event for a plan fallback is `default_graph_fallback` (the existing model), not `plan_fallback`.
+    - `FakeClock` now advances only when no other callback is ready to run, so per-Task timeouts and the watchdog never fire while work is still runnable.
 
 - [ ] 7. Workstream `ws/agents`: agents, prompts and the OpenAI adapter
   - [ ] 7.1 Write the prompt templates and builders
