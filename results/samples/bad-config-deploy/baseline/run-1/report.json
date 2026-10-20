@@ -1,0 +1,523 @@
+{
+  "schema_version": 1,
+  "system": "baseline",
+  "built_by": "baseline",
+  "incident": {
+    "incident_id": "inc-e4c5349a46f3",
+    "title": "Elevated 5xx errors on reviews-0ee",
+    "affected_service": "reviews-0ee",
+    "start_time": "2024-01-18T00:50:00Z",
+    "severity": "sev2"
+  },
+  "verdict": "inconclusive",
+  "termination_reason": "final_answer",
+  "budget_limit": null,
+  "hypotheses": [
+    {
+      "hypothesis_id": "H1",
+      "rank": 1,
+      "revision": 1,
+      "component": "reviews-0ee",
+      "cause_type": "config_error",
+      "statement": "The 00:34 UTC reduction of db.pool.max_connections to 5 caused connection starvation in reviews-0ee, driving the 5xx spike and latency increase.",
+      "supporting_evidence_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.78,
+      "raw_confidence": 0.78,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Logs or metrics showing DB connection exhaustion, timeouts, or pool wait saturation after the config change.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "DB connection metric trend around the incident window to confirm saturation.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "Error rate jumped from ~0.3-0.5% to 32% starting at 00:50 UTC.",
+        "The only recent change found for reviews-0ee was a pool-size reduction 16 minutes before onset."
+      ]
+    },
+    {
+      "hypothesis_id": "H2",
+      "rank": 2,
+      "revision": 1,
+      "component": "reviews-0ee",
+      "cause_type": "connection_pool_exhaustion",
+      "statement": "The service exhausted its database connection pool after the max_connections reduction, causing request failures and high latency.",
+      "supporting_evidence_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.72,
+      "raw_confidence": 0.72,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Direct evidence of pool exhaustion or connection acquisition failures in logs.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "DB connections metric to show the pool or database was saturated.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "The timing strongly matches the config change.",
+        "The symptom pattern is consistent with request queuing and failures."
+      ]
+    },
+    {
+      "hypothesis_id": "H3",
+      "rank": 3,
+      "revision": 1,
+      "component": "reviews-0ee",
+      "cause_type": "dependency_timeout",
+      "statement": "An upstream dependency of reviews-0ee began timing out, and the service's elevated 5xx/latency are downstream symptoms rather than the root cause.",
+      "supporting_evidence_ids": [
+        "E0004",
+        "E0002"
+      ],
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.18,
+      "raw_confidence": 0.18,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Logs or metrics from upstream dependencies during the incident window.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "Latency/error metrics for dependencies to identify a failing upstream component.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "reviews-0ee depends on checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54.",
+        "No dependency telemetry was checked yet, so upstream failure remains possible."
+      ]
+    },
+    {
+      "hypothesis_id": "H4",
+      "rank": 4,
+      "revision": 1,
+      "component": "reviews-0ee",
+      "cause_type": "deploy_regression",
+      "statement": "A recent deployment or code change in reviews-0ee introduced a regression that caused the outage.",
+      "supporting_evidence_ids": [
+        "E0002"
+      ],
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.05,
+      "raw_confidence": 0.05,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Deployment history for reviews-0ee in the hours before onset.",
+          "suggested_tool": "get_deployments"
+        },
+        {
+          "description": "Error logs indicating application-level exceptions tied to a new build.",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "The service is clearly degraded, but no deployment was found in the recent change window.",
+        "The only observed change was a config change, not a deployment."
+      ]
+    }
+  ],
+  "superseded_hypotheses": [],
+  "facts": [
+    {
+      "claim_id": "F001",
+      "producer": "baseline",
+      "text": "The incident report's affected service is reviews-0ee.",
+      "evidence_ids": [
+        "E0002",
+        "E0003",
+        "E0004"
+      ]
+    },
+    {
+      "claim_id": "F002",
+      "producer": "baseline",
+      "text": "The incident started at 2024-01-18T00:50:00Z.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F003",
+      "producer": "baseline",
+      "text": "HTTP 5xx rate on reviews-0ee rose sharply above normal and stayed elevated after 00:50 UTC.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F004",
+      "producer": "baseline",
+      "text": "A config change at 00:34 UTC reduced db.pool.max_connections from 50 to 5 on reviews-0ee.",
+      "evidence_ids": [
+        "E0003"
+      ]
+    }
+  ],
+  "assumptions": [],
+  "data_gaps": [],
+  "recommended_actions": [
+    {
+      "action_id": "A1",
+      "text": "Inspect logs and DB connection metrics around 00:34-02:20 UTC for pool wait time, connection acquisition failures, and timeout patterns to confirm whether the reduced max_connections caused saturation.",
+      "category": "further_investigation",
+      "hypothesis_id": "H1",
+      "evidence_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A2",
+      "text": "Verify whether the database or client pool hit its connection ceiling after the config change, and compare against request latency/error spikes to confirm exhaustion.",
+      "category": "further_investigation",
+      "hypothesis_id": "H2",
+      "evidence_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A3",
+      "text": "Check upstream dependency logs and metrics for checkout-23b, media-bbe, session-cache-8e3, geo-api-38e, and front-lb-b54 during the incident window to rule out a dependency timeout.",
+      "category": "further_investigation",
+      "hypothesis_id": "H3",
+      "evidence_ids": [
+        "E0002",
+        "E0004"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A4",
+      "text": "Review deployment history and application logs for reviews-0ee to rule out a coincident deploy regression.",
+      "category": "further_investigation",
+      "hypothesis_id": "H4",
+      "evidence_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "producer": "baseline"
+    }
+  ],
+  "claim_statuses": [
+    {
+      "claim_id": "IC1",
+      "kind": "symptom",
+      "text": "HTTP 5xx rate on reviews-0ee above 25%",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC2",
+      "kind": "symptom",
+      "text": "p99 latency on reviews-0ee several times above normal",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC3",
+      "kind": "affected_service",
+      "text": "The affected service is reviews-0ee.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC4",
+      "kind": "start_time",
+      "text": "The incident started at 2024-01-18T00:50:00+00:00.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    }
+  ],
+  "missing_evidence": [
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H1",
+      "description": "Logs or metrics showing DB connection exhaustion, timeouts, or pool wait saturation after the config change.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H1",
+      "description": "DB connection metric trend around the incident window to confirm saturation.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H2",
+      "description": "Direct evidence of pool exhaustion or connection acquisition failures in logs.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H2",
+      "description": "DB connections metric to show the pool or database was saturated.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H3",
+      "description": "Logs or metrics from upstream dependencies during the incident window.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H3",
+      "description": "Latency/error metrics for dependencies to identify a failing upstream component.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H4",
+      "description": "Deployment history for reviews-0ee in the hours before onset.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H4",
+      "description": "Error logs indicating application-level exceptions tied to a new build.",
+      "ref": null
+    }
+  ],
+  "budget_usage": {
+    "tool_calls": {
+      "used": 4.0,
+      "limit": 60.0
+    },
+    "tokens": {
+      "used": 9433.0,
+      "limit": 400000.0
+    },
+    "input_tokens": 8096,
+    "output_tokens": 1337,
+    "critic_rounds": {
+      "used": 0.0,
+      "limit": 3.0
+    },
+    "wall_clock_s": {
+      "used": 5.649,
+      "limit": 900.0
+    }
+  },
+  "evidence_appendix": [
+    {
+      "evidence_id": "E0001",
+      "tool": "query_logs",
+      "query": {
+        "limit": 25,
+        "tool": "query_logs",
+        "service": "reviews-0ee",
+        "time_range": {
+          "start": "2024-01-17T23:50:00Z",
+          "end": "2024-01-18T02:50:00Z"
+        },
+        "levels": [
+          "error",
+          "warn"
+        ],
+        "text": null,
+        "attributes": null
+      },
+      "observation": {
+        "record_count": 0,
+        "time_span": null,
+        "top_values": [],
+        "key_attributes": {},
+        "metric_stats": null,
+        "note": "no records matched",
+        "truncated": false
+      },
+      "reliability": "stale"
+    },
+    {
+      "evidence_id": "E0002",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "reviews-0ee",
+        "metric_name": "error_rate",
+        "time_range": {
+          "start": "2024-01-17T23:50:00Z",
+          "end": "2024-01-18T02:50:00Z"
+        },
+        "step_seconds": 600
+      },
+      "observation": {
+        "record_count": 16,
+        "time_span": {
+          "start": "2024-01-17T23:50:00Z",
+          "end": "2024-01-18T02:20:00Z"
+        },
+        "top_values": [
+          {
+            "value": "error_rate reviews-0ee",
+            "count": 16,
+            "first_seen": "2024-01-17T23:50:00Z"
+          }
+        ],
+        "key_attributes": {
+          "metric_name": [
+            "error_rate"
+          ],
+          "service": [
+            "reviews-0ee"
+          ]
+        },
+        "metric_stats": {
+          "min": 0.0021,
+          "max": 0.32,
+          "mean": 0.202425,
+          "first": 0.00416,
+          "last": 0.32,
+          "max_at": "2024-01-18T00:40:00Z",
+          "min_at": "2024-01-17T23:50:00Z"
+        },
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0003",
+      "tool": "get_deployments",
+      "query": {
+        "limit": 25,
+        "tool": "get_deployments",
+        "time_range": {
+          "start": "2024-01-11T00:50:00Z",
+          "end": "2024-01-18T00:50:00Z"
+        },
+        "service": "reviews-0ee",
+        "change_types": [
+          "config_change",
+          "deployment",
+          "feature_flag_change"
+        ]
+      },
+      "observation": {
+        "record_count": 1,
+        "time_span": {
+          "start": "2024-01-18T00:34:00Z",
+          "end": "2024-01-18T00:34:00.000001Z"
+        },
+        "top_values": [
+          {
+            "value": "config_change reviews-0ee @2024-01-18T00:34:00Z: Set db.pool.max_connections from 50 to 5",
+            "count": 1,
+            "first_seen": "2024-01-18T00:34:00Z"
+          }
+        ],
+        "key_attributes": {
+          "change_type": [
+            "config_change"
+          ],
+          "service": [
+            "reviews-0ee"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "partial"
+    },
+    {
+      "evidence_id": "E0004",
+      "tool": "get_dependencies",
+      "query": {
+        "limit": 25,
+        "tool": "get_dependencies",
+        "service": "reviews-0ee",
+        "depth": 5
+      },
+      "observation": {
+        "record_count": 6,
+        "time_span": null,
+        "top_values": [
+          {
+            "value": "upstream checkout-23b (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "downstream front-lb-b54 (load_balancer) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream media-bbe (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream session-cache-8e3 (cache) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream geo-api-38e (third_party_api) hops=2",
+            "count": 1,
+            "first_seen": null
+          }
+        ],
+        "key_attributes": {
+          "component": [
+            "checkout-23b",
+            "front-lb-b54",
+            "geo-api-38e",
+            "mail-queue-53f",
+            "media-bbe"
+          ],
+          "direction": [
+            "downstream",
+            "upstream"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "partial"
+    }
+  ]
+}

@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "system": "baseline",
+  "built_by": "baseline",
+  "incident": {
+    "incident_id": "inc-c8c6cf544662",
+    "title": "Write errors on shipping-1cd",
+    "affected_service": "shipping-1cd",
+    "start_time": "2024-01-05T08:10:00Z",
+    "severity": "sev2"
+  },
+  "verdict": "inconclusive",
+  "termination_reason": "final_answer",
+  "budget_limit": null,
+  "hypotheses": [
+    {
+      "hypothesis_id": "H1",
+      "rank": 1,
+      "revision": 1,
+      "component": "orders-db-9d9",
+      "cause_type": "database_failover",
+      "statement": "orders-db-9d9 likely failed over to a read-only replica or otherwise became read-only around 08:07-08:10, causing shipping-1cd write attempts to fail and intermittent connection resets.",
+      "supporting_evidence_ids": [
+        "E0001",
+        "E0002",
+        "E0004"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.86,
+      "raw_confidence": 0.86,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Database-side logs or metrics confirming a failover, promotion, or replica read-only state change at the onset.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "Replication lag / connection / failover metrics for orders-db-9d9 around 08:10 UTC.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "Write attempts fail with 'cannot execute UPDATE in a read-only transaction'",
+        "Intermittent SQLSTATE 08006 connection resets to orders-db-9d9",
+        "Error spike begins just before the reported start time"
+      ]
+    },
+    {
+      "hypothesis_id": "H2",
+      "rank": 2,
+      "revision": 1,
+      "component": "orders-db-9d9",
+      "cause_type": "connection_pool_exhaustion",
+      "statement": "A database connectivity issue on orders-db-9d9 may have caused resets and secondary read-only transaction errors seen by shipping-1cd.",
+      "supporting_evidence_ids": [
+        "E0001"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.42,
+      "raw_confidence": 0.42,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "DB connection metrics or pool saturation evidence around the incident window.",
+          "suggested_tool": "query_metrics"
+        },
+        {
+          "description": "Logs from orders-db-9d9 showing pool exhaustion or connection churn.",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "Repeated connection reset errors",
+        "Could explain write failures as a downstream symptom"
+      ]
+    },
+    {
+      "hypothesis_id": "H3",
+      "rank": 3,
+      "revision": 1,
+      "component": "shipping-1cd",
+      "cause_type": "code_defect",
+      "statement": "shipping-1cd may contain a write-path defect that mishandles database transaction state, surfacing as read-only transaction errors.",
+      "supporting_evidence_ids": [
+        "E0001"
+      ],
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.18,
+      "raw_confidence": 0.18,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Application release or config evidence for shipping-1cd outside the queried window, or code-level traces showing a local bug.",
+          "suggested_tool": "get_deployments"
+        },
+        {
+          "description": "More detailed application logs showing the exact code path leading to the failed UPDATE.",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "Errors are emitted by shipping-1cd itself",
+        "No recent shipping-1cd deployments were found in the pre-incident window"
+      ]
+    },
+    {
+      "hypothesis_id": "H4",
+      "rank": 4,
+      "revision": 1,
+      "component": "shipping-1cd",
+      "cause_type": "deploy_regression",
+      "statement": "A recent deployment or config change in shipping-1cd caused the write failures.",
+      "supporting_evidence_ids": [],
+      "contradicting_evidence_ids": [
+        "E0003"
+      ],
+      "confidence": 0.08,
+      "raw_confidence": 0.08,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Any deployment/config/feature-flag change near 08:10 UTC for shipping-1cd.",
+          "suggested_tool": "get_deployments"
+        }
+      ],
+      "contributing_factors": [
+        "Deployment/config changes are a common cause to check"
+      ]
+    }
+  ],
+  "superseded_hypotheses": [],
+  "facts": [],
+  "assumptions": [],
+  "data_gaps": [],
+  "recommended_actions": [
+    {
+      "action_id": "A1",
+      "text": "Check orders-db-9d9 for failover/promotion events, read-only mode transitions, and replication health around 08:07-08:10 UTC.",
+      "category": "further_investigation",
+      "hypothesis_id": "H1",
+      "evidence_ids": [
+        "E0001",
+        "E0002",
+        "E0004"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A2",
+      "text": "If the database is still read-only or unstable, restore primary writable access and verify shipping-1cd write success before reopening traffic.",
+      "category": "mitigation",
+      "hypothesis_id": "H1",
+      "evidence_ids": [
+        "E0001",
+        "E0002"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A3",
+      "text": "Inspect database connection metrics and server logs for pool exhaustion or connection churn to determine whether connectivity issues preceded the write failures.",
+      "category": "further_investigation",
+      "hypothesis_id": "H2",
+      "evidence_ids": [
+        "E0001"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A4",
+      "text": "Review shipping-1cd application traces and any out-of-window releases/configuration to rule out a local write-path defect.",
+      "category": "further_investigation",
+      "hypothesis_id": "H3",
+      "evidence_ids": [
+        "E0001",
+        "E0003"
+      ],
+      "producer": "baseline"
+    }
+  ],
+  "claim_statuses": [
+    {
+      "claim_id": "IC1",
+      "kind": "symptom",
+      "text": "HTTP 5xx rate on shipping-1cd above 15%",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC2",
+      "kind": "symptom",
+      "text": "Orders submitted through shipping-1cd fail to save",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0001"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC3",
+      "kind": "affected_service",
+      "text": "The affected service is shipping-1cd.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0001",
+        "E0002",
+        "E0004"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC4",
+      "kind": "start_time",
+      "text": "The incident started at 2024-01-05T08:10:00+00:00.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0001",
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    }
+  ],
+  "missing_evidence": [
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H1",
+      "description": "Database-side logs or metrics confirming a failover, promotion, or replica read-only state change at the onset.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H1",
+      "description": "Replication lag / connection / failover metrics for orders-db-9d9 around 08:10 UTC.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H2",
+      "description": "DB connection metrics or pool saturation evidence around the incident window.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H2",
+      "description": "Logs from orders-db-9d9 showing pool exhaustion or connection churn.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H3",
+      "description": "Application release or config evidence for shipping-1cd outside the queried window, or code-level traces showing a local bug.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H3",
+      "description": "More detailed application logs showing the exact code path leading to the failed UPDATE.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H4",
+      "description": "Any deployment/config/feature-flag change near 08:10 UTC for shipping-1cd.",
+      "ref": null
+    }
+  ],
+  "budget_usage": {
+    "tool_calls": {
+      "used": 4.0,
+      "limit": 60.0
+    },
+    "tokens": {
+      "used": 9617.0,
+      "limit": 400000.0
+    },
+    "input_tokens": 8484,
+    "output_tokens": 1133,
+    "critic_rounds": {
+      "used": 0.0,
+      "limit": 3.0
+    },
+    "wall_clock_s": {
+      "used": 5.088,
+      "limit": 900.0
+    }
+  },
+  "evidence_appendix": [
+    {
+      "evidence_id": "E0001",
+      "tool": "query_logs",
+      "query": {
+        "limit": 25,
+        "tool": "query_logs",
+        "service": "shipping-1cd",
+        "time_range": {
+          "start": "2024-01-05T07:10:00Z",
+          "end": "2024-01-05T10:10:00Z"
+        },
+        "levels": [
+          "error",
+          "warn"
+        ],
+        "text": null,
+        "attributes": null
+      },
+      "observation": {
+        "record_count": 12,
+        "time_span": {
+          "start": "2024-01-05T08:07:13.579214Z",
+          "end": "2024-01-05T08:12:50.116187Z"
+        },
+        "top_values": [
+          {
+            "value": "error shipping-1cd: connection to orders-db-#d# reset during query (SQLSTATE #)",
+            "count": 6,
+            "first_seen": "2024-01-05T08:07:53.139530Z"
+          },
+          {
+            "value": "error shipping-1cd: write to orders-db-#d# failed: cannot execute UPDATE in a read-only transaction",
+            "count": 6,
+            "first_seen": "2024-01-05T08:07:13.579214Z"
+          }
+        ],
+        "key_attributes": {
+          "level": [
+            "error"
+          ],
+          "service": [
+            "shipping-1cd"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0002",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "shipping-1cd",
+        "metric_name": "error_rate",
+        "time_range": {
+          "start": "2024-01-05T07:10:00Z",
+          "end": "2024-01-05T10:10:00Z"
+        },
+        "step_seconds": 600
+      },
+      "observation": {
+        "record_count": 13,
+        "time_span": {
+          "start": "2024-01-05T07:10:00Z",
+          "end": "2024-01-05T09:10:00Z"
+        },
+        "top_values": [
+          {
+            "value": "error_rate shipping-1cd",
+            "count": 13,
+            "first_seen": "2024-01-05T07:10:00Z"
+          }
+        ],
+        "key_attributes": {
+          "metric_name": [
+            "error_rate"
+          ],
+          "service": [
+            "shipping-1cd"
+          ]
+        },
+        "metric_stats": {
+          "min": 0.0021,
+          "max": 0.2242,
+          "mean": 0.016669,
+          "first": 0.0039,
+          "last": 0.003557,
+          "max_at": "2024-01-05T08:10:00Z",
+          "min_at": "2024-01-05T08:20:00Z"
+        },
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0003",
+      "tool": "get_deployments",
+      "query": {
+        "limit": 25,
+        "tool": "get_deployments",
+        "time_range": {
+          "start": "2023-12-29T08:10:00Z",
+          "end": "2024-01-05T08:10:00Z"
+        },
+        "service": "shipping-1cd",
+        "change_types": [
+          "config_change",
+          "deployment",
+          "feature_flag_change"
+        ]
+      },
+      "observation": {
+        "record_count": 0,
+        "time_span": null,
+        "top_values": [],
+        "key_attributes": {},
+        "metric_stats": null,
+        "note": "no records matched",
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0004",
+      "tool": "get_dependencies",
+      "query": {
+        "limit": 25,
+        "tool": "get_dependencies",
+        "service": "shipping-1cd",
+        "depth": 5
+      },
+      "observation": {
+        "record_count": 7,
+        "time_span": null,
+        "top_values": [
+          {
+            "value": "upstream auth-d4f (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream orders-db-9d9 (database) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream profile-609 (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "downstream public-lb-63f (load_balancer) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream session-cache-0da (cache) hops=1",
+            "count": 1,
+            "first_seen": null
+          }
+        ],
+        "key_attributes": {
+          "component": [
+            "auth-d4f",
+            "jobs-queue-21c",
+            "orders-db-9d9",
+            "profile-609",
+            "public-lb-63f"
+          ],
+          "direction": [
+            "downstream",
+            "upstream"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    }
+  ]
+}

@@ -1,0 +1,719 @@
+{
+  "schema_version": 1,
+  "system": "multi",
+  "built_by": "reporting_agent",
+  "incident": {
+    "incident_id": "inc-e4c5349a46f3",
+    "title": "Elevated 5xx errors on reviews-0ee",
+    "affected_service": "reviews-0ee",
+    "start_time": "2024-01-18T00:50:00Z",
+    "severity": "sev2"
+  },
+  "verdict": "conclusive",
+  "termination_reason": "critic_accepted",
+  "budget_limit": null,
+  "hypotheses": [
+    {
+      "hypothesis_id": "H2",
+      "rank": 1,
+      "revision": 2,
+      "component": "reviews-0ee",
+      "cause_type": "connection_pool_exhaustion",
+      "statement": "reviews-0ee likely exhausted its database connection pool after the pool limit was reduced from 50 to 5, causing request queuing, elevated latency, and 5xx errors.",
+      "supporting_evidence_ids": [
+        "E0003",
+        "E0005",
+        "E0007"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.9,
+      "raw_confidence": 0.9,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Direct pool saturation evidence such as pool waiters, connection acquisition latency, or exhausted connection counts at the incident onset.",
+          "suggested_tool": "query_metrics"
+        },
+        {
+          "description": "Additional logs or traces showing request queuing or repeated connection acquisition failures immediately after the config change.",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "Config change reduced db.pool.max_connections from 50 to 5 shortly before symptoms",
+        "Repeated log errors report timed out waiting for a database connection",
+        "p99 latency rose sharply in the same window"
+      ]
+    },
+    {
+      "hypothesis_id": "H1",
+      "rank": 2,
+      "revision": 2,
+      "component": "reviews-0ee",
+      "cause_type": "config_error",
+      "statement": "A configuration change on reviews-0ee mis-sized the database pool, and the resulting config error directly caused the incident symptoms.",
+      "supporting_evidence_ids": [
+        "E0003",
+        "E0005",
+        "E0007"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.84,
+      "raw_confidence": 0.84,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Evidence that the new pool setting was intended and safe for expected traffic, or that another config parameter also changed.",
+          "suggested_tool": "get_deployments"
+        },
+        {
+          "description": "Metrics or traces tying the config change to request queuing and 5xx generation rather than a coincidental timing overlap.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "Recent config change is the only observed change near onset",
+        "Timeout errors appeared after the change",
+        "Latency and error rate both worsened after the change"
+      ]
+    },
+    {
+      "hypothesis_id": "H3",
+      "rank": 3,
+      "revision": 2,
+      "component": "reviews-0ee",
+      "cause_type": "dependency_timeout",
+      "statement": "An upstream dependency of reviews-0ee intermittently timed out, and reviews-0ee surfaced those failures as 5xx and higher latency.",
+      "supporting_evidence_ids": [
+        "E0004",
+        "E0002"
+      ],
+      "contradicting_evidence_ids": [
+        "E0005"
+      ],
+      "confidence": 0.28,
+      "raw_confidence": 0.28,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Current logs or traces showing timeout failures to checkout-23b, media-bbe, session-cache-8e3, or geo-api-38e around onset.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "Dependency-specific latency or error metrics demonstrating an upstream outage or slowdown at the same time.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "reviews-0ee has several upstream dependencies that could fail independently",
+        "Observed symptoms could be secondary to upstream slowness"
+      ]
+    },
+    {
+      "hypothesis_id": "H4",
+      "rank": 4,
+      "revision": 2,
+      "component": "reviews-0ee",
+      "cause_type": "code_defect",
+      "statement": "The config change exposed or triggered an application bug in reviews-0ee's database handling, leading to connection timeout failures and elevated 5xx/latency.",
+      "supporting_evidence_ids": [
+        "E0003",
+        "E0005"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.2,
+      "raw_confidence": 0.2,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Stack traces or application error details indicating a code path bug rather than pure resource shortage.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "Deployment or code-change evidence showing a recent application change correlated with the onset.",
+          "suggested_tool": "get_deployments"
+        }
+      ],
+      "contributing_factors": [
+        "Timeouts may reflect an application-level handling issue",
+        "No code deployment evidence is currently present"
+      ]
+    }
+  ],
+  "superseded_hypotheses": [],
+  "facts": [
+    {
+      "claim_id": "F001",
+      "producer": "observability",
+      "text": "reviews-0ee error_rate jumped from a baseline around 0.003-0.005 to 0.32 starting at 2024-01-18T00:40Z and stayed at 0.32 through the queried range.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F002",
+      "producer": "observability",
+      "text": "No error or warn log records matched the queried reviews-0ee window, so logs did not show a detectable change in that range.",
+      "evidence_ids": [
+        "E0001"
+      ]
+    },
+    {
+      "claim_id": "F003",
+      "producer": "dependency",
+      "text": "reviews-0ee had a config change at 2024-01-18T00:34:00Z setting db.pool.max_connections from 50 to 5; this is on the affected service itself and directly in its database access path, making it the most relevant recent dependency-related change near the incident start.",
+      "evidence_ids": [
+        "E0003"
+      ]
+    },
+    {
+      "claim_id": "F004",
+      "producer": "dependency",
+      "text": "reviews-0ee depends upstream on checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e, and has downstream front-lb-b54; this places the affected service in a path where upstream issues could also surface as reviews-0ee errors, but no recent change in those dependencies is evidenced here.",
+      "evidence_ids": [
+        "E0004"
+      ]
+    },
+    {
+      "claim_id": "F005",
+      "producer": "observability",
+      "text": "reviews-0ee error_rate rose sharply and peaked at 0.32 at 2024-01-18T00:40:00Z, consistent with the reported 5xx surge.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F006",
+      "producer": "observability",
+      "text": "reviews-0ee began emitting repeated error logs for database connection acquisition timeouts starting at 2024-01-18T00:46:06.458639Z, which supports request queuing/pool exhaustion after the pool size reduction.",
+      "evidence_ids": [
+        "E0005"
+      ]
+    },
+    {
+      "claim_id": "F007",
+      "producer": "observability",
+      "text": "A config change on reviews-0ee set db.pool.max_connections from 50 to 5 at 2024-01-18T00:34:00Z, and connection-timeout errors appeared shortly afterward, making the config change a plausible trigger for the elevated 5xx/latency symptoms.",
+      "evidence_ids": [
+        "E0003",
+        "E0005"
+      ]
+    },
+    {
+      "claim_id": "F008",
+      "producer": "observability",
+      "text": "reviews-0ee shows a sharp increase in p99 latency starting at 2024-01-18T00:45:00Z, rising from ~170-190 ms to 1041.2161 ms and staying there through the queried range.",
+      "evidence_ids": [
+        "E0007"
+      ]
+    },
+    {
+      "claim_id": "F009",
+      "producer": "observability",
+      "text": "reviews-0ee shows elevated error_rate beginning by 2024-01-18T00:40:00Z, reaching 0.32 at peak in the queried window.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F010",
+      "producer": "observability",
+      "text": "reviews-0ee logs show error-level request failures with the pattern 'timed out waiting for a database connection' starting at 2024-01-18T00:46:06.458639Z.",
+      "evidence_ids": [
+        "E0005"
+      ]
+    },
+    {
+      "claim_id": "F011",
+      "producer": "observability",
+      "text": "reviews-0ee had a config change at 2024-01-18T00:34:00Z that set db.pool.max_connections from 50 to 5, which is temporally close to the onset of the latency and timeout symptoms.",
+      "evidence_ids": [
+        "E0003"
+      ]
+    },
+    {
+      "claim_id": "F012",
+      "producer": "reporting",
+      "text": "reviews-0ee error_rate jumped from a baseline around 0.003-0.005 to 0.32 starting at 2024-01-18T00:40:00Z and stayed elevated through the queried range.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F013",
+      "producer": "reporting",
+      "text": "The service had a config change at 2024-01-18T00:34:00Z setting db.pool.max_connections from 50 to 5.",
+      "evidence_ids": [
+        "E0003"
+      ]
+    },
+    {
+      "claim_id": "F014",
+      "producer": "reporting",
+      "text": "Repeated error logs reported timed out waiting for a database connection starting at 2024-01-18T00:46:06.458639Z.",
+      "evidence_ids": [
+        "E0005"
+      ]
+    },
+    {
+      "claim_id": "F015",
+      "producer": "reporting",
+      "text": "p99 latency rose sharply to 1041.2161 ms at 2024-01-18T00:45:00Z and remained elevated.",
+      "evidence_ids": [
+        "E0007"
+      ]
+    },
+    {
+      "claim_id": "F016",
+      "producer": "reporting",
+      "text": "The evidence most strongly supports connection-pool exhaustion or mis-sizing on reviews-0ee as the incident driver.",
+      "evidence_ids": [
+        "E0003",
+        "E0005",
+        "E0007"
+      ]
+    }
+  ],
+  "assumptions": [],
+  "data_gaps": [],
+  "recommended_actions": [
+    {
+      "action_id": "A1",
+      "text": "Restore the database connection pool to a safe value and validate the service under expected traffic; the pool reduction from 50 to 5 is the most plausible trigger for the observed connection-timeout errors, latency spike, and 5xx surge.",
+      "category": "fix",
+      "hypothesis_id": "H2",
+      "evidence_ids": [
+        "E0003",
+        "E0005",
+        "E0007"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A2",
+      "text": "If the service is still degraded, temporarily increase available database connections or roll back the pool limit change to relieve request queuing and connection-acquisition timeouts.",
+      "category": "mitigation",
+      "hypothesis_id": "H2",
+      "evidence_ids": [
+        "E0005",
+        "E0007"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A3",
+      "text": "Add a deployment/configuration guardrail for db.pool.max_connections changes, including approval, safe defaults, and automated checks that block reductions likely to exhaust the pool under normal load.",
+      "category": "prevention",
+      "hypothesis_id": "H1",
+      "evidence_ids": [
+        "E0003",
+        "E0005",
+        "E0007"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A4",
+      "text": "Add alerting and dashboards for connection-pool saturation signals, including pool wait time, exhausted connections, and request timeout rates, so future mis-sizing is detected before 5xx errors rise.",
+      "category": "prevention",
+      "hypothesis_id": "H1",
+      "evidence_ids": [
+        "E0003",
+        "E0005",
+        "E0007"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A5",
+      "text": "Verify whether any upstream dependency of reviews-0ee was slow or failing at incident onset by checking dependency-specific logs and metrics for checkout-23b, media-bbe, session-cache-8e3, and geo-api-38e.",
+      "category": "further_investigation",
+      "hypothesis_id": "H3",
+      "evidence_ids": [
+        "E0004"
+      ],
+      "producer": "reporting_agent"
+    },
+    {
+      "action_id": "A6",
+      "text": "Review application traces and stack details for the connection-timeout path to rule out an underlying code defect that could have been exposed by the pool-size change.",
+      "category": "further_investigation",
+      "hypothesis_id": "H4",
+      "evidence_ids": [
+        "E0003",
+        "E0005"
+      ],
+      "producer": "reporting_agent"
+    }
+  ],
+  "claim_statuses": [
+    {
+      "claim_id": "IC1",
+      "kind": "symptom",
+      "text": "HTTP 5xx rate on reviews-0ee above 25%",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC2",
+      "kind": "symptom",
+      "text": "p99 latency on reviews-0ee several times above normal",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0007"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC3",
+      "kind": "affected_service",
+      "text": "The affected service is reviews-0ee.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC4",
+      "kind": "start_time",
+      "text": "The incident started at 2024-01-18T00:50:00+00:00.",
+      "status": "contradicted",
+      "corroborating_ids": [],
+      "contradicting_ids": [
+        "E0002",
+        "E0003"
+      ],
+      "label": "fact"
+    }
+  ],
+  "missing_evidence": [],
+  "budget_usage": {
+    "tool_calls": {
+      "used": 7.0,
+      "limit": 60.0
+    },
+    "tokens": {
+      "used": 51218.0,
+      "limit": 400000.0
+    },
+    "input_tokens": 46361,
+    "output_tokens": 4857,
+    "critic_rounds": {
+      "used": 2.0,
+      "limit": 3.0
+    },
+    "wall_clock_s": {
+      "used": 25.188,
+      "limit": 900.0
+    }
+  },
+  "evidence_appendix": [
+    {
+      "evidence_id": "E0001",
+      "tool": "query_logs",
+      "query": {
+        "limit": 25,
+        "tool": "query_logs",
+        "service": "reviews-0ee",
+        "time_range": {
+          "start": "2024-01-17T23:50:00Z",
+          "end": "2024-01-18T02:50:00Z"
+        },
+        "levels": [
+          "error",
+          "warn"
+        ],
+        "text": null,
+        "attributes": null
+      },
+      "observation": {
+        "record_count": 0,
+        "time_span": null,
+        "top_values": [],
+        "key_attributes": {},
+        "metric_stats": null,
+        "note": "no records matched",
+        "truncated": false
+      },
+      "reliability": "stale"
+    },
+    {
+      "evidence_id": "E0002",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "reviews-0ee",
+        "metric_name": "error_rate",
+        "time_range": {
+          "start": "2024-01-17T23:50:00Z",
+          "end": "2024-01-18T02:50:00Z"
+        },
+        "step_seconds": 600
+      },
+      "observation": {
+        "record_count": 16,
+        "time_span": {
+          "start": "2024-01-17T23:50:00Z",
+          "end": "2024-01-18T02:20:00Z"
+        },
+        "top_values": [
+          {
+            "value": "error_rate reviews-0ee",
+            "count": 16,
+            "first_seen": "2024-01-17T23:50:00Z"
+          }
+        ],
+        "key_attributes": {
+          "metric_name": [
+            "error_rate"
+          ],
+          "service": [
+            "reviews-0ee"
+          ]
+        },
+        "metric_stats": {
+          "min": 0.0021,
+          "max": 0.32,
+          "mean": 0.202425,
+          "first": 0.00416,
+          "last": 0.32,
+          "max_at": "2024-01-18T00:40:00Z",
+          "min_at": "2024-01-17T23:50:00Z"
+        },
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0003",
+      "tool": "get_deployments",
+      "query": {
+        "limit": 25,
+        "tool": "get_deployments",
+        "time_range": {
+          "start": "2024-01-11T00:50:00Z",
+          "end": "2024-01-18T00:50:00Z"
+        },
+        "service": "reviews-0ee",
+        "change_types": [
+          "config_change",
+          "deployment",
+          "feature_flag_change"
+        ]
+      },
+      "observation": {
+        "record_count": 1,
+        "time_span": {
+          "start": "2024-01-18T00:34:00Z",
+          "end": "2024-01-18T00:34:00.000001Z"
+        },
+        "top_values": [
+          {
+            "value": "config_change reviews-0ee @2024-01-18T00:34:00Z: Set db.pool.max_connections from 50 to 5",
+            "count": 1,
+            "first_seen": "2024-01-18T00:34:00Z"
+          }
+        ],
+        "key_attributes": {
+          "change_type": [
+            "config_change"
+          ],
+          "service": [
+            "reviews-0ee"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "partial"
+    },
+    {
+      "evidence_id": "E0004",
+      "tool": "get_dependencies",
+      "query": {
+        "limit": 25,
+        "tool": "get_dependencies",
+        "service": "reviews-0ee",
+        "depth": 5
+      },
+      "observation": {
+        "record_count": 6,
+        "time_span": null,
+        "top_values": [
+          {
+            "value": "upstream checkout-23b (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "downstream front-lb-b54 (load_balancer) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream media-bbe (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream session-cache-8e3 (cache) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream geo-api-38e (third_party_api) hops=2",
+            "count": 1,
+            "first_seen": null
+          }
+        ],
+        "key_attributes": {
+          "component": [
+            "checkout-23b",
+            "front-lb-b54",
+            "geo-api-38e",
+            "mail-queue-53f",
+            "media-bbe"
+          ],
+          "direction": [
+            "downstream",
+            "upstream"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "partial"
+    },
+    {
+      "evidence_id": "E0005",
+      "tool": "query_logs",
+      "query": {
+        "limit": 25,
+        "tool": "query_logs",
+        "service": "reviews-0ee",
+        "time_range": {
+          "start": "2024-01-18T00:34:00Z",
+          "end": "2024-01-18T01:10:00Z"
+        },
+        "levels": [
+          "error",
+          "warn"
+        ],
+        "text": null,
+        "attributes": null
+      },
+      "observation": {
+        "record_count": 16,
+        "time_span": {
+          "start": "2024-01-18T00:46:06.458639Z",
+          "end": "2024-01-18T01:08:37.687487Z"
+        },
+        "top_values": [
+          {
+            "value": "error reviews-0ee: request failed: timed out waiting for a database connection (pool size #)",
+            "count": 16,
+            "first_seen": "2024-01-18T00:46:06.458639Z"
+          }
+        ],
+        "key_attributes": {
+          "level": [
+            "error"
+          ],
+          "service": [
+            "reviews-0ee"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0006",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "reviews-0ee",
+        "metric_name": "db_connections",
+        "time_range": {
+          "start": "2024-01-18T00:20:00Z",
+          "end": "2024-01-18T01:20:00Z"
+        },
+        "step_seconds": 300
+      },
+      "observation": {
+        "record_count": 0,
+        "time_span": null,
+        "top_values": [],
+        "key_attributes": {},
+        "metric_stats": null,
+        "note": "no records matched",
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0007",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "reviews-0ee",
+        "metric_name": "latency_p99_ms",
+        "time_range": {
+          "start": "2024-01-18T00:20:00Z",
+          "end": "2024-01-18T01:20:00Z"
+        },
+        "step_seconds": 300
+      },
+      "observation": {
+        "record_count": 12,
+        "time_span": {
+          "start": "2024-01-18T00:20:00Z",
+          "end": "2024-01-18T01:15:00Z"
+        },
+        "top_values": [
+          {
+            "value": "latency_p99_ms reviews-0ee",
+            "count": 12,
+            "first_seen": "2024-01-18T00:20:00Z"
+          }
+        ],
+        "key_attributes": {
+          "metric_name": [
+            "latency_p99_ms"
+          ],
+          "service": [
+            "reviews-0ee"
+          ]
+        },
+        "metric_stats": {
+          "min": 162.8202,
+          "max": 1041.2161,
+          "mean": 637.960778,
+          "first": 179.41648,
+          "last": 1041.2161,
+          "max_at": "2024-01-18T00:45:00Z",
+          "min_at": "2024-01-18T00:40:00Z"
+        },
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    }
+  ]
+}

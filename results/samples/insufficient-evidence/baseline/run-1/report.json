@@ -1,0 +1,535 @@
+{
+  "schema_version": 1,
+  "system": "baseline",
+  "built_by": "baseline",
+  "incident": {
+    "incident_id": "inc-5104beb8441c",
+    "title": "Elevated errors on payments-c30",
+    "affected_service": "payments-c30",
+    "start_time": "2024-01-16T12:53:00Z",
+    "severity": "sev3"
+  },
+  "verdict": "inconclusive",
+  "termination_reason": "final_answer",
+  "budget_limit": null,
+  "hypotheses": [
+    {
+      "hypothesis_id": "H1",
+      "rank": 1,
+      "revision": 1,
+      "component": "payments-c30",
+      "cause_type": "deploy_regression",
+      "statement": "A deployment to payments-c30 shortly before the onset introduced a regression that caused the sustained 5xx spike.",
+      "supporting_evidence_ids": [
+        "E0003",
+        "E0001",
+        "E0002"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.46,
+      "raw_confidence": 0.46,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Deployment diff or release notes showing what changed in build 346 and whether it touched request handling or upstream calls.",
+          "suggested_tool": "get_deployments"
+        },
+        {
+          "description": "Service-specific logs or traces pinpointing the failing code path after the deployment.",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "A deployment occurred at 2024-01-16T12:46:10Z, about 7 minutes before the reported start time.",
+        "Error rate jumped from ~0.4% to ~12% soon after the deployment.",
+        "Logs show repeated 500/503 responses from payments-c30 during the incident window."
+      ]
+    },
+    {
+      "hypothesis_id": "H2",
+      "rank": 2,
+      "revision": 1,
+      "component": "payments-c30",
+      "cause_type": "dependency_timeout",
+      "statement": "payments-c30 is failing because one of its upstream dependencies is timing out or intermittently failing, causing 500/503 responses.",
+      "supporting_evidence_ids": [
+        "E0001",
+        "E0002",
+        "E0004"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.28,
+      "raw_confidence": 0.28,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Logs or metrics from upstream dependencies around the incident window to identify which dependency degraded first.",
+          "suggested_tool": "query_logs"
+        },
+        {
+          "description": "Dependency-specific latency/error metrics for pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "payments-c30 depends on pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
+        "The logs include TLS handshake resets and alternating 500/503s, which can be consistent with upstream instability.",
+        "The available evidence does not isolate the failing dependency."
+      ]
+    },
+    {
+      "hypothesis_id": "H3",
+      "rank": 3,
+      "revision": 1,
+      "component": "payments-c30",
+      "cause_type": "load_balancer_misconfiguration",
+      "statement": "A downstream load balancer or routing issue is intermittently resetting TLS handshakes and contributing to the elevated errors.",
+      "supporting_evidence_ids": [
+        "E0001",
+        "E0004"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.16,
+      "raw_confidence": 0.16,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "Logs or configuration changes for front-lb-7b6 around the incident window.",
+          "suggested_tool": "get_deployments"
+        },
+        {
+          "description": "Load balancer error/latency metrics or access logs to confirm handshake resets originated there.",
+          "suggested_tool": "query_metrics"
+        }
+      ],
+      "contributing_factors": [
+        "Logs show TLS handshake reset by peer errors.",
+        "payments-c30 has a downstream dependency on front-lb-7b6, so routing/TLS issues are plausible."
+      ]
+    },
+    {
+      "hypothesis_id": "H4",
+      "rank": 4,
+      "revision": 1,
+      "component": "payments-c30",
+      "cause_type": "resource_exhaustion",
+      "statement": "payments-c30 itself may be resource constrained, leading to elevated 5xx responses without an external dependency failure.",
+      "supporting_evidence_ids": [
+        "E0001",
+        "E0002"
+      ],
+      "contradicting_evidence_ids": [],
+      "confidence": 0.1,
+      "raw_confidence": 0.1,
+      "evidence_sufficient": false,
+      "missing_evidence": [
+        {
+          "description": "CPU, memory, disk, and connection-pool metrics for payments-c30 during the incident window.",
+          "suggested_tool": "query_metrics"
+        },
+        {
+          "description": "Process or runtime logs indicating saturation, OOMs, or queue buildup.",
+          "suggested_tool": "query_logs"
+        }
+      ],
+      "contributing_factors": [
+        "Sustained 5xxs can result from local saturation or exhaustion.",
+        "No direct dependency failure has been confirmed yet."
+      ]
+    }
+  ],
+  "superseded_hypotheses": [],
+  "facts": [
+    {
+      "claim_id": "F001",
+      "producer": "baseline",
+      "text": "The incident report's symptom claim is supported: payments-c30's HTTP error rate rose above 10% during the incident window.",
+      "evidence_ids": [
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F002",
+      "producer": "baseline",
+      "text": "The affected service is payments-c30.",
+      "evidence_ids": [
+        "E0001",
+        "E0002"
+      ]
+    },
+    {
+      "claim_id": "F003",
+      "producer": "baseline",
+      "text": "The incident start time of 2024-01-16T12:53:00Z is supported by the error-rate jump and matching error logs around that time.",
+      "evidence_ids": [
+        "E0001",
+        "E0002"
+      ]
+    }
+  ],
+  "assumptions": [],
+  "data_gaps": [],
+  "recommended_actions": [
+    {
+      "action_id": "A1",
+      "text": "Inspect the build 346 diff and release notes, then correlate the changed code paths with the first 5xxs to confirm or rule out a deploy regression.",
+      "category": "further_investigation",
+      "hypothesis_id": "H1",
+      "evidence_ids": [
+        "E0003",
+        "E0001",
+        "E0002"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A2",
+      "text": "Check upstream dependency health and logs around 12:46-13:15 UTC, prioritizing pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
+      "category": "further_investigation",
+      "hypothesis_id": "H2",
+      "evidence_ids": [
+        "E0004",
+        "E0001",
+        "E0002"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A3",
+      "text": "Review front-lb-7b6 configuration and telemetry for TLS resets or routing anomalies during the incident window.",
+      "category": "further_investigation",
+      "hypothesis_id": "H3",
+      "evidence_ids": [
+        "E0001",
+        "E0004"
+      ],
+      "producer": "baseline"
+    },
+    {
+      "action_id": "A4",
+      "text": "Pull payments-c30 resource metrics and runtime logs to check for saturation, queueing, or connection exhaustion during the spike.",
+      "category": "further_investigation",
+      "hypothesis_id": "H4",
+      "evidence_ids": [
+        "E0001",
+        "E0002"
+      ],
+      "producer": "baseline"
+    }
+  ],
+  "claim_statuses": [
+    {
+      "claim_id": "IC1",
+      "kind": "symptom",
+      "text": "HTTP 5xx rate on payments-c30 above 10%",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC2",
+      "kind": "affected_service",
+      "text": "The affected service is payments-c30.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0001",
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    },
+    {
+      "claim_id": "IC3",
+      "kind": "start_time",
+      "text": "The incident started at 2024-01-16T12:53:00+00:00.",
+      "status": "verified",
+      "corroborating_ids": [
+        "E0001",
+        "E0002"
+      ],
+      "contradicting_ids": [],
+      "label": "fact"
+    }
+  ],
+  "missing_evidence": [
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H1",
+      "description": "Deployment diff or release notes showing what changed in build 346 and whether it touched request handling or upstream calls.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H1",
+      "description": "Service-specific logs or traces pinpointing the failing code path after the deployment.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H2",
+      "description": "Logs or metrics from upstream dependencies around the incident window to identify which dependency degraded first.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H2",
+      "description": "Dependency-specific latency/error metrics for pricing-46a, ledger-db-fda, object-cache-ec9, checkout-f18, and tax-api-c44.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H3",
+      "description": "Logs or configuration changes for front-lb-7b6 around the incident window.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H3",
+      "description": "Load balancer error/latency metrics or access logs to confirm handshake resets originated there.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H4",
+      "description": "CPU, memory, disk, and connection-pool metrics for payments-c30 during the incident window.",
+      "ref": null
+    },
+    {
+      "source": "reasoning_agent",
+      "hypothesis_id": "H4",
+      "description": "Process or runtime logs indicating saturation, OOMs, or queue buildup.",
+      "ref": null
+    }
+  ],
+  "budget_usage": {
+    "tool_calls": {
+      "used": 4.0,
+      "limit": 60.0
+    },
+    "tokens": {
+      "used": 10146.0,
+      "limit": 400000.0
+    },
+    "input_tokens": 8759,
+    "output_tokens": 1387,
+    "critic_rounds": {
+      "used": 0.0,
+      "limit": 3.0
+    },
+    "wall_clock_s": {
+      "used": 5.987,
+      "limit": 900.0
+    }
+  },
+  "evidence_appendix": [
+    {
+      "evidence_id": "E0001",
+      "tool": "query_logs",
+      "query": {
+        "limit": 25,
+        "tool": "query_logs",
+        "service": "payments-c30",
+        "time_range": {
+          "start": "2024-01-16T11:53:00Z",
+          "end": "2024-01-16T14:53:00Z"
+        },
+        "levels": [
+          "error",
+          "warn"
+        ],
+        "text": null,
+        "attributes": null
+      },
+      "observation": {
+        "record_count": 23,
+        "time_span": {
+          "start": "2024-01-16T11:53:52.491209Z",
+          "end": "2024-01-16T13:18:46.694484Z"
+        },
+        "top_values": [
+          {
+            "value": "error payments-c30: request failed with status #",
+            "count": 20,
+            "first_seen": "2024-01-16T12:50:37.126312Z"
+          },
+          {
+            "value": "error payments-c30: TLS handshake reset by peer",
+            "count": 2,
+            "first_seen": "2024-01-16T12:39:49.077386Z"
+          },
+          {
+            "value": "error payments-c30: request aborted by client after # ms",
+            "count": 1,
+            "first_seen": "2024-01-16T11:53:52.491209Z"
+          }
+        ],
+        "key_attributes": {
+          "level": [
+            "error"
+          ],
+          "service": [
+            "payments-c30"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0002",
+      "tool": "query_metrics",
+      "query": {
+        "limit": 25,
+        "tool": "query_metrics",
+        "service": "payments-c30",
+        "metric_name": "error_rate",
+        "time_range": {
+          "start": "2024-01-16T11:53:00Z",
+          "end": "2024-01-16T14:53:00Z"
+        },
+        "step_seconds": 600
+      },
+      "observation": {
+        "record_count": 12,
+        "time_span": {
+          "start": "2024-01-16T11:53:00Z",
+          "end": "2024-01-16T13:43:00Z"
+        },
+        "top_values": [
+          {
+            "value": "error_rate payments-c30",
+            "count": 12,
+            "first_seen": "2024-01-16T11:53:00Z"
+          }
+        ],
+        "key_attributes": {
+          "metric_name": [
+            "error_rate"
+          ],
+          "service": [
+            "payments-c30"
+          ]
+        },
+        "metric_stats": {
+          "min": 0.002,
+          "max": 0.1236,
+          "mean": 0.063559,
+          "first": 0.00369,
+          "last": 0.119943,
+          "max_at": "2024-01-16T13:13:00Z",
+          "min_at": "2024-01-16T11:53:00Z"
+        },
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0003",
+      "tool": "get_deployments",
+      "query": {
+        "limit": 25,
+        "tool": "get_deployments",
+        "time_range": {
+          "start": "2024-01-09T12:53:00Z",
+          "end": "2024-01-16T12:53:00Z"
+        },
+        "service": "payments-c30",
+        "change_types": [
+          "config_change",
+          "deployment",
+          "feature_flag_change"
+        ]
+      },
+      "observation": {
+        "record_count": 1,
+        "time_span": {
+          "start": "2024-01-16T12:46:10.158896Z",
+          "end": "2024-01-16T12:46:10.158897Z"
+        },
+        "top_values": [
+          {
+            "value": "deployment payments-c30 @2024-01-16T12:46:10Z: Deploy build 346: copy changes",
+            "count": 1,
+            "first_seen": "2024-01-16T12:46:10.158896Z"
+          }
+        ],
+        "key_attributes": {
+          "change_type": [
+            "deployment"
+          ],
+          "service": [
+            "payments-c30"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    },
+    {
+      "evidence_id": "E0004",
+      "tool": "get_dependencies",
+      "query": {
+        "limit": 25,
+        "tool": "get_dependencies",
+        "service": "payments-c30",
+        "depth": 5
+      },
+      "observation": {
+        "record_count": 6,
+        "time_span": null,
+        "top_values": [
+          {
+            "value": "upstream checkout-f18 (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "downstream front-lb-7b6 (load_balancer) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream ledger-db-fda (database) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream object-cache-ec9 (cache) hops=1",
+            "count": 1,
+            "first_seen": null
+          },
+          {
+            "value": "upstream pricing-46a (service) hops=1",
+            "count": 1,
+            "first_seen": null
+          }
+        ],
+        "key_attributes": {
+          "component": [
+            "checkout-f18",
+            "front-lb-7b6",
+            "ledger-db-fda",
+            "object-cache-ec9",
+            "pricing-46a"
+          ],
+          "direction": [
+            "downstream",
+            "upstream"
+          ]
+        },
+        "metric_stats": null,
+        "note": null,
+        "truncated": false
+      },
+      "reliability": "complete"
+    }
+  ]
+}
