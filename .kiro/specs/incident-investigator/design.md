@@ -623,6 +623,10 @@ Every Tool_Request counts as one step, including rejected ones (Req 8.4, 9.5). E
 | Reporting | Verdict; Termination_Reason; active and superseded Hypotheses with adjusted confidence; evidence summaries; findings; Data_Gaps; missing-evidence list; max actions; categories |
 | Baseline | Incident_Report; claims; all five Tool schemas and vocabularies; `valid_components`; the opening windows; Tool_Call and token Budget used / limit; full step history (opening Observations at step 0, then notes + Observations) |
 
+**Citation IDs.** `CITATION_IDS`, part of `COMMON` and so of every template, says that only evidence IDs (E…) may appear in evidence-ID fields; finding (F…), data gap (G…), claim (IC…), hypothesis (H…) and request (ER…) IDs may not. Board-backed prompts (Reasoning, Critic, Reporting) key findings as `finding_id` with `cites_evidence_ids`, key Data_Gaps as `data_gap_id`, and carry an `id_types` legend. In the first full evaluation, 249 of 254 removed citations were finding or gap IDs placed in evidence fields.
+
+**Action evidence (Req 12.4).** `state/citations.unsupported_action_problems()` checks mitigation, fix and prevention actions on the IDs that survive citation validation: at least one must be in the ledger. It is a repairable content rule for the Reporting_Agent and the Baseline_Agent final answer, so an action can no longer pass with only absent IDs and reach the report with none.
+
 **Shared investigation checklist.** `INVESTIGATION_CHECKLIST` in `agents/prompts/templates.py` is one generic constant included verbatim in the Observability, Dependency, Reasoning and Baseline templates (Req 25.12): verify the report's claims, keep competing hypotheses open, check recent changes and upstream dependencies, treat past incidents as hints only, and declare no verdict until each ranked hypothesis has current, complete support or the budget is spent. It names no scenario, cause or Component.
 
 ### Baseline_Agent (`baseline/react.py`)
@@ -639,7 +643,7 @@ The Baseline_Agent uses the same Tool_Layer stack, configuration fields, Citatio
 4. A `tool_request` result passes its Observation to the next step. A `final_answer` goes through the Citation_Validator, the Confidence_Policy, `baseline_verdict` and the ReportAssembler, and ends with `final_answer` (Req 25.4).
 5. If a limit is reached first, including during the openings → DRG with the matching reason (Req 25.6).
 
-The prompt carries the shared investigation checklist (Req 25.12) and shows the Tool_Call and token Budgets used and remaining, so the model can answer before the token Budget runs out.
+The prompt carries the shared investigation checklist (Req 25.12) and shows the Tool_Call and token Budgets used and remaining, so the model can answer before the token Budget runs out. A Baseline-only rule (`BASELINE_QUERY_BEFORE_INCONCLUSIVE`, not part of the shared checklist) tells the model not to give an inconclusive answer while tool calls remain: it first requests the evidence it would list as missing. Each step's user message restates the remaining tool calls. In the first full evaluation the baseline answered on step 1 in all 36 Runs.
 
 ### Report (`report/`)
 
@@ -1564,7 +1568,7 @@ The Observation has the same format whether the caller is a Specialist_Agent or 
 
 - the validator accepts Observability claims iff each names one service, one signal, exactly one of onset / no-onset, and ≥ 1 citation;
 - it accepts Dependency claims iff Components are non-empty, the event time is present unless the type is dependency relation, and historical ⇔ every citation is search_incidents;
-- it accepts Reporting output iff it has ≤ max actions and every mitigation/fix/prevention action cites ≥ 1 ID;
+- it accepts Reporting output iff it has ≤ max actions and every mitigation/fix/prevention action cites ≥ 1 ID that is in the ledger (checked on the IDs the Citation_Validator keeps, so absent IDs cannot satisfy it);
 - it accepts a Baseline answer iff it has ≤ 5 Hypotheses meeting the Reasoning rank rules, a status for every claim with citations for verified/contradicted, and valid actions.
 
 **Validates: Requirements 8.3, 9.3, 9.4, 12.1, 12.4, 25.7**

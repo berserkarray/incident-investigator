@@ -12,8 +12,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ...llm.context import render_context
+from ...models.claims import LabelledClaim
 from ...models.critic import EvidenceRequest
 from ...models.evidence import EvidenceItem, LedgerView, Observation
+from ...models.gaps import DataGap
 from ...models.hypothesis import HypothesisRevision
 from ...models.incident import IncidentClaim, IncidentReport
 from ...models.report import ReportHypothesis
@@ -49,6 +51,16 @@ DAG_RULES = (
     "exactly one reporting task with no dependencies; it runs after the investigation loop ends",
     "no other tasks, no cycles, unique task_id values, and depends_on names only task_ids in the plan",
 )
+
+ID_TYPES: dict[str, str] = {
+    "evidence_id": "E0001, E0002, ...: the only IDs that may be cited as evidence",
+    "finding_id": "F001, F002, ...: a specialist finding; not evidence, cite its cites_evidence_ids instead",
+    "data_gap_id": "G001, G002, ...: evidence that could not be obtained; never evidence",
+    "claim_id": "IC1, IC2, ...: an incident report claim to give a status for; not evidence",
+    "hypothesis_id": "H1, H2, ...: a hypothesis; not evidence",
+    "request_id": "ER1.1, ER1.2, ...: a critic evidence request; not evidence",
+}
+"""Legend of every ID type in board-backed prompts, so finding and gap IDs are not cited as evidence."""
 
 CRITIC_RULES = (
     "Accept only the rank-1 hypothesis, by its hypothesis_id, and only when no evidence request is filed.",
@@ -158,13 +170,32 @@ def support_profile(h: HypothesisRevision, ledger: LedgerView) -> dict[str, Any]
     }
 
 
+def finding_entry(finding: LabelledClaim) -> dict[str, Any]:
+    """A Specialist finding, keyed ``finding_id`` (F...) so it is not mistaken for an evidence or claim ID."""
+    return {
+        "finding_id": finding.claim_id,
+        "producer": str(finding.producer),
+        "task_id": finding.task_id,
+        "label": finding.label.value,
+        "finding": finding.body.model_dump(mode="json", exclude={"evidence_ids"}),
+        "cites_evidence_ids": list(finding.body.evidence_ids),
+    }
+
+
+def data_gap_entry(gap: DataGap) -> dict[str, Any]:
+    """A Data_Gap, keyed ``data_gap_id`` (G...): a record of missing evidence, never citable as evidence."""
+    data = gap.model_dump(mode="json")
+    return {"data_gap_id": data.pop("gap_id"), **data}
+
+
 def _board_common(board: BlackboardReader) -> dict[str, Any]:
     return {
+        "id_types": dict(ID_TYPES),
         "evidence": [evidence_entry(e) for e in board.evidence()],
-        "data_gaps": [g.model_dump(mode="json") for g in board.data_gaps()],
+        "data_gaps": [data_gap_entry(g) for g in board.data_gaps()],
         "claims": [claim_entry(c) for c in board.claims()],
         "evidence_requests": [request_entry(r) for r in board.evidence_requests()],
-        "findings": [f.model_dump(mode="json") for f in board.findings()],
+        "findings": [finding_entry(f) for f in board.findings()],
     }
 
 
@@ -293,9 +324,10 @@ def reporting_prompt(
         "termination_reason": termination_reason,
         "hypotheses": [hypothesis_entry(h) for h in ranked],
         "superseded_hypotheses": [hypothesis_entry(h) for h in superseded],
+        "id_types": dict(ID_TYPES),
         "evidence": [evidence_entry(e) for e in board.evidence()],
-        "findings": [f.model_dump(mode="json") for f in board.findings()],
-        "data_gaps": [g.model_dump(mode="json") for g in board.data_gaps()],
+        "findings": [finding_entry(f) for f in board.findings()],
+        "data_gaps": [data_gap_entry(g) for g in board.data_gaps()],
         "missing_evidence": list(missing_evidence),
         "max_actions": max_actions,
         "action_categories": [c.value for c in ActionCategory],

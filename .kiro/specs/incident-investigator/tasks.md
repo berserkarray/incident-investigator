@@ -466,6 +466,11 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
       - `INVESTIGATION_CHECKLIST` is included verbatim in the Observability, Dependency, Reasoning and Baseline templates; the sentences it replaced were removed from those templates. The Baseline prompt also shows tool vocabularies and the token budget used and remaining (Req 25.12).
       - `tests/e2e/test_baseline_parity.py` checks identical opening requests and outcomes for both systems, with random injection off and on, and that the openings stop at the Tool_Call Budget.
       - CLI e2e tests patch `cli.SystemClock` with `FakeClock`. Injected timeouts back off on the Clock, and the real-sleep guard used to surface only as a hidden Specialist Agent_Failure.
+    - Improvement round after `v1-submittable` (tag on `c3eea24`):
+      - Baseline-only rule: no inconclusive answer while tool calls remain; query the listed missing evidence first. Not part of the shared checklist.
+      - `CITATION_IDS` in every template, and `finding_id`, `data_gap_id` and `id_types` in the board prompts.
+      - Req 12.4: action evidence is checked on the IDs that survive citation validation (`tests/unit/test_action_evidence.py`).
+      - Then the full eval was re-run the same way.
     - Done on 2026-10-20 at commit `625913d`, with `--out runs/eval-full` (git-ignored). The Markdown and JSON Results_Tables were copied to `results/`, plus run-1 reports of four scenarios under `results/samples/`. Full run folders and `data/` are not committed. 72 Runs, 0 failed; the key scan of all 290 output files and the log found nothing.
     - _Requirements: 25.11, 25.12, 26.1, 26.4, 26.5, 31.6, 31.11_
   - [x] 12.3 Update the README with the results

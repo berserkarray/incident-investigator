@@ -84,8 +84,15 @@ def baseline_prompt(
         "max_actions": config.report.max_recommended_actions,
         "action_categories": [c.value for c in ActionCategory],
     }
+    remaining = max(0, config.budgets.tool_calls - tool_calls_used)
+    reminder = (
+        f" {remaining} tool calls remain: if your answer would be inconclusive, request the evidence you would "
+        "list as missing instead."
+        if remaining
+        else " The tool-call budget is spent: give the final answer."
+    )
     return (
         "Investigate the incident. Your evidence so far is in context.history, starting with the opening "
         "observations. Either request one more tool or give the final answer, citing the evidence_id of each "
-        "observation you rely on.\n\n" + render_context(context)
+        f"observation you rely on.{reminder}\n\n" + render_context(context)
     )

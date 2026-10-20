@@ -12,6 +12,7 @@ from ..models.outputs import ReportingOutput
 from ..models.tasks import Task
 from ..models.vocab import AgentName, CallKind
 from ..report.assembler import missing_evidence_entries, to_report_hypotheses
+from ..state.citations import unsupported_action_problems
 from .base import Agent, AgentContext, AgentOutcome
 from .prompts import templates
 from .prompts.builders import reporting_prompt
@@ -27,6 +28,7 @@ def check_reporting(output: BaseModel, vctx: ValidationContext) -> list[str]:
     ]
     if len(output.recommended_actions) > vctx.max_actions:
         problems.append(f"recommended_actions: at most {vctx.max_actions} actions")
+    problems.extend(unsupported_action_problems(output.recommended_actions, vctx.ledger))
     return problems
 
 

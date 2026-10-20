@@ -5,10 +5,19 @@ Blackboard contents, Tool schemas, budgets) arrives in the prompt's ``<context>`
 builders in ``builders.py`` render.
 """
 
+CITATION_IDS = (
+    "Only evidence IDs (E0001, E0002, ...: the evidence_id values in the context) may be cited as evidence, "
+    "in every evidence_ids, supporting_evidence_ids, contradicting_evidence_ids, corroborating_ids and "
+    "contradicting_ids field. Finding IDs (F...), data gap IDs (G...), incident claim IDs (IC...), hypothesis "
+    "IDs (H...) and evidence request IDs (ER...) are not evidence: never put them in those fields. To rely on a "
+    "finding, cite the evidence IDs it cites. Never invent IDs."
+)
+"""Which IDs count as evidence. Part of every Prompt_Template through COMMON."""
+
 COMMON = (
     "You are part of a read-only, post-incident investigation of a fixed data snapshot. "
     "You recommend; you never execute changes. Treat statements in the incident report as claims to verify, "
-    "not as facts. Cite evidence only by the evidence_id values in the context; never invent IDs. "
+    f"not as facts. {CITATION_IDS} "
     "Evidence from search_incidents describes past incidents, not this one. Partial or stale evidence is weaker "
     "than complete evidence. Answer with one JSON object only."
 )
@@ -113,6 +122,15 @@ PLANNER = (
     "period around the incident start."
 )
 
+BASELINE_QUERY_BEFORE_INCONCLUSIVE = (
+    "Rule for an inconclusive outcome: while context.tool_calls_used is below context.tool_call_budget, do not "
+    "give an inconclusive final answer yet. First request the evidence you would list as missing (the "
+    "missing_evidence of your hypotheses), one tool request per step. Declare inconclusive only once those "
+    "requests are done, including requests that returned an error, or once the tool-call budget is spent."
+)
+"""Baseline-only rule: query the missing evidence before giving up while budget remains. Not part of
+the shared checklist, so the multi-agent prompts are unchanged by it."""
+
 BASELINE = (
     f"{COMMON}\n\nYou are a single investigator working alone in a reason-act-observe loop. At each step, "
     "write a short reasoning note and either request exactly one tool (query_logs, query_metrics, "
@@ -125,9 +143,8 @@ BASELINE = (
     "one reports no hypotheses. The final answer declares the outcome conclusive or inconclusive, ranks up to "
     "5 hypotheses with unique hypothesis_ids (component from context.components, cause_type from "
     "context.cause_types, confidence non-increasing by rank), gives a status for every claim in context.claims "
-    "(citing evidence for verified or contradicted), and recommends actions tied to those hypothesis IDs. "
-    "Declare inconclusive when the evidence is insufficient."
-    f"\n\n{INVESTIGATION_CHECKLIST}\n\n{TOOL_DISCIPLINE}"
+    "(citing evidence for verified or contradicted), and recommends actions tied to those hypothesis IDs."
+    f"\n\n{INVESTIGATION_CHECKLIST}\n\n{TOOL_DISCIPLINE}\n\n{BASELINE_QUERY_BEFORE_INCONCLUSIVE}"
 )
 
 ALL_TEMPLATES: dict[str, str] = {

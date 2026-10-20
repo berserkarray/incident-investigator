@@ -12,9 +12,35 @@ from ..models.claims import ClaimBody
 from ..models.evidence import LedgerView
 from ..models.incident import ClaimStatusUpdate, IncidentClaim
 from ..models.outputs import HypothesisDraft, RecommendedActionDraft
-from ..models.vocab import Caller, ClaimLabel, ClaimStatus
+from ..models.vocab import ActionCategory, Caller, ClaimLabel, ClaimStatus
 
 TargetKind = Literal["claim", "hypothesis", "recommended_action", "claim_status"]
+
+EVIDENCE_BACKED_CATEGORIES: frozenset[ActionCategory] = frozenset(
+    {ActionCategory.MITIGATION, ActionCategory.FIX, ActionCategory.PREVENTION}
+)
+"""Recommended_Action categories that must cite evidence (Req 12.4)."""
+
+
+def unsupported_action_problems(
+    actions: Sequence[RecommendedActionDraft], ledger: LedgerView, path: str = "recommended_actions"
+) -> list[str]:
+    """Req 12.4, checked on what the Citation_Validator will keep.
+
+    The Citation_Validator removes every cited ID that is absent from the Run_Ledger, so a mitigation,
+    fix or prevention action is checked on its *remaining* IDs: it needs at least one Evidence_ID that
+    is in the ledger. Used as a repairable content rule before the output is committed, so an action
+    can no longer pass with only absent IDs and then reach the report with none.
+    """
+    problems = []
+    for index, action in enumerate(actions):
+        if action.category in EVIDENCE_BACKED_CATEGORIES and not any(ledger.has(e) for e in action.evidence_ids):
+            cited = ", ".join(action.evidence_ids) or "none"
+            problems.append(
+                f"{path}.{index}.evidence_ids: a {action.category} action must cite at least one evidence ID "
+                f"(E0001, E0002, ...) from the context; cited: {cited}, none of which is an evidence ID in the ledger"
+            )
+    return problems
 
 
 @dataclass(frozen=True)

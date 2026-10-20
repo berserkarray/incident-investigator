@@ -49,7 +49,7 @@ from ..report.deterministic import DeterministicReportGenerator
 from ..report.writer import RunOutputSink
 from ..runtime import RunDependencies
 from ..state.blackboard import Blackboard
-from ..state.citations import CitableOutput, CitationValidator, apply_claim_updates
+from ..state.citations import CitableOutput, CitationValidator, apply_claim_updates, unsupported_action_problems
 from ..state.confidence import apply_confidence_policy
 from ..state.verdict import baseline_verdict
 from ..tools.layer import BoardToolBudget, ScopedToolPort, build_tool_layer
@@ -97,6 +97,7 @@ def check_baseline_step(output: BaseModel, vctx: ValidationContext) -> list[str]
             )
     if len(final.recommended_actions) > vctx.max_actions:
         problems.append(f"final_answer.recommended_actions: at most {vctx.max_actions} actions")
+    problems.extend(unsupported_action_problems(final.recommended_actions, vctx.ledger, "final_answer.recommended_actions"))
     return problems
 
 
