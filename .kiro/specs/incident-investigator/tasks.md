@@ -268,7 +268,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 45: Verdict rules.** **Validates: Requirements 16.4, 19.1, 19.2, 25.5**
   - [ ] 6.11 Branch checkpoint: tests green on `ws/orchestrator-state`, rebased on `main`.
 
-- [ ] 7. Workstream `ws/agents`: agents, prompts and the OpenAI adapter
+- [x] 7. Workstream `ws/agents`: agents, prompts and the OpenAI adapter
   - [x] 7.1 Write the prompt templates and builders
     - `agents/prompts/`: one constant Prompt_Template per agent plus a builder that renders run-time content and one `<context>` JSON block, per the design prompt table.
     - Reasoning and Critic builders include each Evidence_Item's ID, Tool, canonical query, reliability and Observation_Summary, and never retained records.
@@ -315,7 +315,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - **Property 24: Specialist, Reporting and Baseline output validation.** **Validates: Requirements 8.3, 9.3, 9.4, 12.1, 12.4, 25.7**
     - **Property 25: Reasoning and Critic prompts carry summaries, not records.** **Validates: Requirements 10.7, 11.15**
     - **Property 26: Hypothesis identity and sufficiency are code-enforced.** **Validates: Requirements 10.8, 10.9**
-  - [ ] 7.11 Branch checkpoint: tests green on `ws/agents`, rebased on `main`.
+  - [x] 7.11 Branch checkpoint: tests green on `ws/agents`, rebased on `main`.
 
 - [ ] 8. Workstream `ws/eval-baseline`: baseline, Evaluator and `cli eval`
   - [ ] 8.1 Write the ReAct Baseline_Agent
