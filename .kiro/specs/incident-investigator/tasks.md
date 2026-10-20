@@ -20,8 +20,8 @@ Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstre
 
 ### Phase 1: Shared models and interfaces (`main`)
 
-- [ ] 1. Shared models, interfaces and test harness
-  - [ ] 1.1 Create the repository skeleton and first commit
+- [x] 1. Shared models, interfaces and test harness
+  - [x] 1.1 Create the repository skeleton and first commit
     - Create `.gitignore` with `.env`, `.env.*`, `.venv/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.hypothesis/`, `runs/`, `dist/`, `*.egg-info/`.
     - Create `pyproject.toml` (Python ≥ 3.11, `src/` layout, console script `incident-investigator = incident_investigator.cli:main`). Pin every direct runtime and dev dependency with `==` (`pydantic`, `openai`, `pytest`, `pytest-asyncio`, `hypothesis`; `anthropic` only in an optional extra if task 7.9 is done). Check current stable versions with `pip index versions <pkg>` at implementation time.
     - Configure pytest in `pyproject.toml`: `asyncio_mode = "auto"`, `testpaths = ["tests"]`.
@@ -29,54 +29,55 @@ Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstre
     - Create the package folders from design "Package layout" with empty `__init__.py`, plus `scenarios/`, `data/snapshots/`, `data/answer_keys/`, `results/`, `transcripts/`, `tests/`.
     - First commit on `main` must contain `.gitignore`.
     - _Requirements: 5.9, 31.8, 31.11_
-  - [ ] 1.2 Write the base model and closed vocabularies
+  - [x] 1.2 Write the base model and closed vocabularies
     - `models/base.py`: `StrictModel` (frozen, `extra="forbid"`), `NonBlank(n)`, `TimeRange` (half-open, `start < end`), `JsonValue`, `canonical_json()`.
     - `models/vocab.py`: `CauseType` (14 values, including `traffic_attack` and `deploy_regression`), `Severity` (sev1–4), `ToolName`, `LogLevel`, `MetricName`, `ChangeType`, `AgentName`, `Caller`, `TaskKind`, `TaskState`, `ConcernCategory` (including `historical_only_support` and `low_reliability_support`), `ActionCategory`, `Reliability`, `Verdict`, `TerminationReason` (Investigator and Baseline sets), `FindingType`, `ErrorCode`.
     - _Requirements: 10.2, 11.2, 12.5, 13.2, 23.13_
-  - [ ] 1.3 Write the incident, snapshot and tool models
+  - [x] 1.3 Write the incident, snapshot and tool models
     - `models/incident.py`: `IncidentReport` with the Req 1.1 constraints, `IncidentClaim`, `ClaimStatusUpdate`.
     - `models/snapshot.py`: `IncidentSnapshot`, records (logs, metric points, change events, dependency edges, past incidents), `FailureProfile` with its Req 14.9 validators.
     - `models/tools.py`: one input model per Tool (`limit` 1–500, default 100), `ToolRecord` with `constituent_ids`, `ToolError`, `ToolResult` (records, error, partial, stale, `as_of`, truncated), `Observation`.
     - _Requirements: 1.1, 13.1, 13.2, 14.9, 25.10_
-  - [ ] 1.4 Write the evidence, claim, output and hypothesis models
+  - [x] 1.4 Write the evidence, claim, output and hypothesis models
     - `models/evidence.py`: `ObservationSummary`, `EvidenceItem`, `RetainedRecords`, `LedgerView`.
     - `models/claims.py`, `models/outputs.py`: `ObservabilityClaim`, `DependencyClaim`, `ClaimDraft`, `LabelledClaim`, `SpecialistStep`, the findings models, `PlanOutput`, `HypothesisDraft`, `ReasoningOutput`, `EvidenceRequestDraft`, `CriticOutput`, `RecommendedActionDraft`, `ReportingOutput`, `BaselineStep`, `BaselineFinalAnswer`. Add only the field-level constraints here; context validators come in 3.5 and 7.x.
     - `models/hypothesis.py`: `HypothesisRevision`, `ConfidenceAdjustment`.
     - _Requirements: 3.2, 8.3, 9.3, 10.1, 10.2, 10.5, 11.2, 12.3, 12.5, 25.7_
-  - [ ] 1.5 Write the task, gap, budget, state, report and trace models
+  - [x] 1.5 Write the task, gap, budget, state, report and trace models
     - `models/tasks.py`, `critic.py`, `gaps.py`, `budget.py`: `Task`, `TaskBrief`, `TaskGraphState`, `EvidenceRequest` with status, `DataGap` with `dedupe_key()`, `TokenCount`, `BudgetLimits`, `BudgetUsage`.
     - `models/blackboard.py`: `BlackboardState`, `TerminationRecord`.
     - `models/report.py`: `InvestigationReport` with every Req 20.1 section, `ReportHypothesis`, `MissingEvidenceEntry`, `RecommendedAction`.
     - `models/trace.py`: discriminated `TraceEvent` union (`task_transition`, `tool_call`, `tool_rejected`, `llm_call`, `citation_violation`, `duplicate_discarded`, `plan_fallback`, `critic_decision`, `termination`, `config`, `budget_final`), `RunTrace`.
     - _Requirements: 3.1, 16.2, 17.1, 18.1, 20.1, 20.2, 29.3, 29.4, 29.5, 29.6_
-  - [ ] 1.6 Write the scenario, answer-key and results models
+  - [x] 1.6 Write the scenario, answer-key and results models
     - `models/scenario.py`: `ScenarioSpec` (8–15 services, 2–24 h window, 7–30 day lookback), `Trap`, `RedHerring`, `FaultTemplateName`, `CatalogueCondition`, `NoiseConstraints`.
     - `models/answer_key.py`: `AnswerKey` (Root_Cause_Label or insufficient marker, Key_Evidence, expected Data_Gaps, canary).
     - `models/results.py`: `RunScore`, `ResultsRow`, `ResultsTable` (header fields from Req 26.5 and 31.6).
     - _Requirements: 22.1, 22.2, 22.5, 24.5, 26.5, 27.8_
-  - [ ] 1.7 Write the configuration loader
+  - [x] 1.7 Write the configuration loader
     - `models/config.py`: nested settings models with the design defaults and the main Req 29.1 bounds (`Field(ge=..., le=...)`, cross-field validators for delay ordering, probability sum, reserve < tokens, concurrency 1–16).
     - `load_config(path)` uses `tomllib` and raises `ConfigError` that lists every invalid, unknown or missing field by dotted path. An unreadable or unparseable file raises an error naming the file.
     - `Config.for_system_under_test()` returns an `InvestigatorConfig` with no answer-key path field.
     - _Requirements: 7.6, 18.1, 24.7, 29.1, 29.2_
-  - [ ] 1.8 Write the Injectable_Clock
+  - [x] 1.8 Write the Injectable_Clock
     - `clock.py`: `Clock` protocol (`now`, `monotonic`, `sleep`, `wait_for`), `SystemClock`, and a simple `FakeClock`.
     - `FakeClock` keeps a heap of sleepers. `advance(dt)` wakes every due sleeper. With `auto_advance=True`, a driver task jumps to the next deadline after a fixed number of idle event-loop turns. `wait_for` raises `ClockTimeout` at the virtual deadline.
     - _Requirements: 15.11, 30.5_
-  - [ ] 1.9 Write the component interfaces
+  - [x] 1.9 Write the component interfaces
     - `llm/base.py`: `LLMRequest`, `LLMResponse`, `LLMErrorCategory`, `LLMCallError`, `LLMClient` protocol.
     - `tools/ports.py`: `ToolPort` protocol, `EvidenceSink`, `GapSink`, `ToolBudget`, `TerminationSignal`.
     - `agents/base.py`: `Agent` ABC and `AgentContext`.
-    - `report/writer.py`: `RunOutputSink` protocol. `orchestrator/run.py`: `RunInputs`, `RunResult`, `RunDependencies`.
-    - `redact.py`: `SecretRedactor` built from `OPENAI_API_KEY` (and `ANTHROPIC_API_KEY` if set).
-    - `trace.py`: `TraceRecorder` that assigns `seq`, stamps time from the Clock and redacts secrets.
+    - `report/writer.py`: `RunOutputSink` protocol. `models/run.py`: `RunInputs`, `RunResult`. `runtime.py`: `RunDependencies` (shared by the Investigator and the Baseline_Agent, so it lives outside `orchestrator/`).
+    - `state/ports.py`: `BlackboardReader` protocol (the read-only view Agents receive).
+    - `redact.py`: `SecretRedactor` built from `OPENAI_API_KEY` (and `ANTHROPIC_API_KEY` if set), plus a redacting `logging.Filter`.
+    - `tracing.py`: `TraceRecorder` that assigns `seq`, stamps time from the Clock and redacts secrets (named `tracing.py` to avoid confusion with `models/trace.py`).
     - _Requirements: 5.1, 5.10, 29.3_
-  - [ ] 1.10 Write the test harness
+  - [x] 1.10 Write the test harness
     - `tests/conftest.py`: autouse fixtures that delete `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`, block socket creation, and fail on any real `time.sleep` or `asyncio.sleep` with a non-zero delay outside `SystemClock` tests.
     - Register the Hypothesis `ci` profile (`max_examples=25`, `derandomize=True`, `database=None`, `deadline=None`) and load it by default.
     - `tests/factories.py`: small builders for snapshots, Incident_Reports, configs and Evidence_Items.
     - _Requirements: 30.1, 30.3, 30.5_
-  - [ ] 1.11 Write model and config unit tests
+  - [x] 1.11 Write model and config unit tests
     - Valid and invalid Incident_Report examples with field-named errors. Config load with defaults, an unknown field, an out-of-range concurrency limit and an unparseable file.
     - _Requirements: 1.1, 1.2, 7.6, 29.2_
   - [ ]* 1.12 Property tests for models and config (lower priority)
@@ -84,7 +85,7 @@ Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstre
     - **Property 47: Report JSON round trip.** **Validates: Requirements 21.4**
     - **Property 64: Configuration validation.** **Validates: Requirements 7.6, 18.1, 29.1, 29.2**
 
-- [ ] 2. Checkpoint: models import cleanly, `pytest` is green, commit on `main`. Ask the user if questions arise.
+- [x] 2. Checkpoint: models import cleanly, `pytest` is green, commit on `main`. Ask the user if questions arise.
 
 ### Phase 2: Thin end-to-end slice on the FakeLLM (`main`)
 
