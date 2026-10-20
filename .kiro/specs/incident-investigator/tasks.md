@@ -416,7 +416,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
 
 ### Phase 4: Integration (`main`)
 
-- [ ] 10. Integrate, then write the documentation
+- [x] 10. Integrate, then write the documentation
   - [x] 10.1 Merge the workstreams
     - Merge order: `ws/tools-data` → `ws/orchestrator-state` → `ws/agents` → `ws/eval-baseline` → `ws/tests`. Before each merge, rebase the branch on `main` and run its tests; after each merge, run the full suite on `main`. Fix failures on the branch, not on `main`.
     - _Requirements: 30.1_
@@ -434,17 +434,17 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
     - One Support_Check, `state/support.py`. Its free-text rule also requires CURRENT, as D2's "Historical_Evidence supports only past-incident claims" demands.
     - The OfflineResponder's `baseline_step` starts from the Baseline prompt's `suggested_windows`, the same windows the Specialists' opening requests use, and skips every probe whose Tool the opening Observations already cover (Req 25.11).
     - The Results_Table JSON keeps exact means and Spreads (Property 62); the Markdown prints 4 decimals.
-  - [ ] 10.4 Write the README
+  - [x] 10.4 Write the README
     - Setup (Python 3.11+, install command, `OPENAI_API_KEY`, every config field with its default, example `generate`, `investigate`, `eval` and `pytest` commands); Architecture (the design Mermaid component diagram and an explanation of coordination: Blackboard, Task_Graph, parallel dispatch, Critic feedback loop, budgets and every Termination_Reason); External Dependencies (OpenAI key, no key for tests or the fake provider, every pinned package and version); Deliverables index (transcript, both Results_Tables, scenarios, tests, `TECHNICAL_NOTE.md`, `ASSUMPTIONS.md`); Incomplete Functionality (task 10.6).
     - State that `provider = "fake"` results are smoke results that do not measure real accuracy.
     - _Requirements: 31.1, 31.2, 31.4, 31.5, 31.7_
-  - [ ] 10.5 Write `TECHNICAL_NOTE.md`
+  - [x] 10.5 Write `TECHNICAL_NOTE.md`
     - At most 500 words, with sections Key Decisions, Trade-offs, Limitations and Potential Improvements. Limitations must state that the Confidence_Policy applies one uniform per-Data_Gap penalty to every Hypothesis regardless of the Data_Gap's relevance to that Hypothesis, and that OfflineResponder results do not measure real accuracy.
     - _Requirements: 31.3, 31.9_
-  - [ ] 10.6 Compile the Incomplete Functionality list
+  - [x] 10.6 Compile the Incomplete Functionality list
     - Walk through Requirements 1–31 and list, by number, every criterion not implemented or only partly implemented (for example the full Req 30.2 per-criterion coverage, the Req 30.3 properties not written, Req 14.8, 21.8, the full 24.3 and 24.10 hardening, every untested config bound, the Anthropic adapter if skipped, Req 31.12 if the fresh-clone check is not run), plus every optional task not done.
     - _Requirements: 31.4_
-  - [ ] 10.7 Write the doc-lint test
+  - [x] 10.7 Write the doc-lint test
     - README has the five required sections and one `mermaid` fence; `TECHNICAL_NOTE.md` has the four headings, ≤ 500 whitespace-separated words and the uniform-penalty sentence; every `pyproject.toml` dependency uses `==`; every README Deliverables path exists.
     - _Requirements: 31.1, 31.2, 31.3, 31.7, 31.8_
 
@@ -456,7 +456,7 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
   - [ ] 12.1 Run the offline smoke evaluation
     - `incident-investigator eval --config config.fake.toml --out results/offline-smoke` (12 scenarios × 3 runs × 2 systems). Check that the Results_Table has every row, no isolation violations and a failed-Run count of zero. Commit it as a pipeline check, labelled as not measuring real accuracy.
     - _Requirements: 26.1, 26.5, 31.10_
-  - [ ] 12.2 Run the real evaluation with OpenAI `gpt-5.4-mini`
+  - [x] 12.2 Run the real evaluation with OpenAI `gpt-5.4-mini`
     - Requires `OPENAI_API_KEY` and incurs API cost. Do not start it without the user's explicit confirmation.
     - First run one scenario × 1 run per system, report the measured tokens per Run and an estimated total cost for 72 Runs, and ask the user to confirm.
     - After confirmation: `incident-investigator eval --config config.toml --out results/` and commit the Markdown and JSON Results_Tables and per-Run outputs. The table records the command, date (YYYY-MM-DD), Seed, provider and model.
@@ -466,8 +466,9 @@ All workstreams depend only on the Phase 1–2 interfaces. `ws/tests` writes tes
       - `INVESTIGATION_CHECKLIST` is included verbatim in the Observability, Dependency, Reasoning and Baseline templates; the sentences it replaced were removed from those templates. The Baseline prompt also shows tool vocabularies and the token budget used and remaining (Req 25.12).
       - `tests/e2e/test_baseline_parity.py` checks identical opening requests and outcomes for both systems, with random injection off and on, and that the openings stop at the Tool_Call Budget.
       - CLI e2e tests patch `cli.SystemClock` with `FakeClock`. Injected timeouts back off on the Clock, and the real-sleep guard used to surface only as a hidden Specialist Agent_Failure.
+    - Done on 2026-10-20 at commit `625913d`, with `--out runs/eval-full` (git-ignored). The Markdown and JSON Results_Tables were copied to `results/`, plus run-1 reports of four scenarios under `results/samples/`. Full run folders and `data/` are not committed. 72 Runs, 0 failed; the key scan of all 290 output files and the log found nothing.
     - _Requirements: 25.11, 25.12, 26.1, 26.4, 26.5, 31.6, 31.11_
-  - [ ] 12.3 Update the README with the results
+  - [x] 12.3 Update the README with the results
     - Add a short results summary that compares both systems on accuracy, grounding, cost and the diagnostics. If only the offline run exists, or any Runs failed, list the shortfall under Incomplete Functionality.
     - _Requirements: 31.6, 31.10_
   - [ ] 12.4 Add the coding-assistant transcript
