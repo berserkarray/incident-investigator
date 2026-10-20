@@ -8,10 +8,25 @@ from ..models.evidence import EvidenceItem, LedgerView
 from ..models.gaps import DataGap
 from ..models.hypothesis import HypothesisRevision
 from ..models.incident import IncidentClaim
+from ..models.blackboard import TerminationRecord
+from ..models.budget import BudgetUsage
+from ..models.hypothesis import ConfidenceAdjustment
 from ..models.tools import ToolRecord
+from ..models.vocab import Verdict
 
 
 class BlackboardReader(Protocol):
+    @property
+    def usage(self) -> BudgetUsage: ...
+
+    @property
+    def verdict(self) -> Verdict | None: ...
+
+    @property
+    def termination(self) -> TerminationRecord | None: ...
+
+    def adjustments(self) -> tuple[ConfidenceAdjustment, ...]: ...
+
     def evidence(self) -> tuple[EvidenceItem, ...]: ...
 
     def records_for(self, evidence_id: str) -> tuple[ToolRecord, ...]: ...

@@ -4,8 +4,9 @@ Every Agent and the Baseline_Agent reach a model only through an ``LLMClient`` w
 LLM gateway; adapters exist for OpenAI and the Fake_LLM (Anthropic is optional).
 """
 
+from collections.abc import Callable
 from enum import StrEnum, auto
-from typing import Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -29,6 +30,7 @@ class LLMRequest(StrictModel):
     output_schema: dict[str, JsonValue] = {}
     max_output_tokens: int = Field(4096, ge=1)
     temperature: float | None = 0.0  # None when the model does not accept the parameter
+    repair_of: CallKind | None = None  # set on repair requests: the call kind being repaired
 
 
 class LLMResponse(StrictModel):
@@ -77,6 +79,10 @@ class ValidationContext(StrictModel):
     max_actions: int = Field(6, ge=1)
 
 
+SemanticCheck = Callable[[Any, ValidationContext], list[str]]
+"""Context rules for one output model: returns error messages; any message fails validation (repairable)."""
+
+
 class StructuredLLM(Protocol):
     """The gateway port Agents use: one validated, structured call with at most one repair."""
 
@@ -88,4 +94,5 @@ class StructuredLLM(Protocol):
         user: str,
         model: type[M],
         ctx: ValidationContext,
+        check: SemanticCheck | None = None,
     ) -> M: ...

@@ -67,7 +67,7 @@ class Observation(StrictModel):
     """What the Tool_Layer returns to a Specialist_Agent or the Baseline_Agent (Req 25.10)."""
 
     evidence_id: str | None
-    tool: ToolName
+    tool: ToolName | str  # a plain string only when the requested Tool name is unknown
     query: ToolInput | None
     raw_params: dict[str, JsonValue]
     summary: ObservationSummary

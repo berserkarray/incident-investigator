@@ -1,0 +1,30 @@
+{
+  "name": "bad-config-deploy",
+  "description": "Baseline case: a configuration change shrinks the database connection pool of the affected service shortly before errors begin. No trap.",
+  "service_count": 9,
+  "telemetry_window_hours": 4,
+  "change_lookback_days": 7,
+  "symptom_onset_offset_minutes": 140,
+  "fault": {
+    "template": "config_regression",
+    "root_role": "affected",
+    "cause_type": "config_error",
+    "params": {
+      "setting": "db.pool.max_connections",
+      "old_value": "50",
+      "new_value": "5",
+      "change_lead_minutes": 12
+    }
+  },
+  "trap": null,
+  "report": {
+    "title": "Elevated 5xx errors on {affected}",
+    "symptoms": [
+      "HTTP 5xx rate on {affected} above 25%",
+      "p99 latency on {affected} several times above normal"
+    ],
+    "severity": "sev2",
+    "start_delay_minutes": 4
+  },
+  "conditions": ["bad_config_baseline"]
+}

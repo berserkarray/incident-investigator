@@ -89,56 +89,64 @@ Work order: Phase 1 and Phase 2 run on `main`. Phase 3 runs as parallel workstre
 
 ### Phase 2: Thin end-to-end slice on the FakeLLM (`main`)
 
-- [ ] 3. Thin end-to-end slice
-  - [ ] 3.1 Write the snapshot loader and `query_logs`
+- [x] 3. Thin end-to-end slice
+  - [x] 3.1 Write the snapshot loader and `query_logs`
     - `tools/snapshot.py`: `PathGuard` (basic: `resolve(strict=True)` and `is_relative_to(root)`), `SnapshotLoader.load()` reading `snapshot.json`, `failure_profile.json` and `incident_report.json`, raising `SnapshotLoadError(path, reason)`.
     - `tools/impl.py`: pure `query_logs` (half-open range, levels, case-insensitive text, exact attributes, sort by `(timestamp, record_id)`, cut to `limit`, set `truncated`). Register it in `TOOL_REGISTRY`.
     - _Requirements: 2.2, 2.3, 2.4, 13.3, 13.9, 13.12, 13.13, 24.3_
-  - [ ] 3.2 Write the ObservationSummarizer
+  - [x] 3.2 Write the ObservationSummarizer
     - `tools/summary.py`: the D3 algorithm for logs first (count, time span, top-K normalised messages with count and first_seen, allowlisted key attributes, `note` for zero records). Leave stubs for the other Tools that the 5.1 work fills in.
     - _Requirements: 3.2, 3.11_
-  - [ ] 3.3 Write the minimal ToolLayer pipeline
+  - [x] 3.3 Write the minimal ToolLayer pipeline
     - `tools/layer.py`: `ToolLayer.request()` with the full D1 stage order (validate → breaker → budget → call → summarise → append), using a no-op injector, an always-closed breaker, `max_attempts=1` and an in-memory Tool_Call counter. `invalid_input` returns field-named errors without a Tool_Call.
     - `ScopedToolPort` restricts each caller to its own Tools.
     - Return the shared `Observation` format (Evidence_ID, summary, records up to the limit, error, flags).
     - _Requirements: 2.1, 3.2, 3.3, 3.4, 3.5, 3.6, 13.8, 25.10_
-  - [ ] 3.4 Write the minimal Blackboard
+  - [x] 3.4 Write the minimal Blackboard
     - `state/blackboard.py`: one `asyncio.Lock`; `append_evidence` assigns `E0001…` and keeps retained records; claims recorded at Run start (Req 1.4); `add_findings`, `add_hypothesis_revisions` (revision `max + 1`, active set), `set_claim_statuses`, `upsert_task`, `add_gap`, `add_usage`, `set_adjustments`, `set_verdict`; reads `evidence()`, `records_for()`, `active_hypotheses()`, `ledger_view()`, `to_state()`.
     - _Requirements: 1.4, 3.1, 3.2, 3.9, 3.12_
-  - [ ] 3.5 Write the minimal LLM layer
+  - [x] 3.5 Write the minimal LLM layer
     - `llm/fake.py`: `ScriptedFakeLLM` (FIFO per `(caller, call_kind)`, records every request, synthetic usage `ceil(chars/4)`, `FakeScriptExhausted` naming the caller).
     - `llm/offline.py`: `OfflineResponder` reading only the `<context>` JSON block. Minimal rules for `plan`, `specialist_step`, `reasoning`, `critic` and `reporting` that yield schema-valid output.
     - `llm/validator.py`: `StructuredOutputValidator` (JSON extraction, `model_validate(..., context=ctx)`, exactly one repair request listing `loc: msg`, then `StructuredOutputFailure`).
     - `llm/gateway.py`: `LLMGateway.structured()` and `raw()`, recording usage per caller and an `llm_call` trace event.
     - _Requirements: 5.3, 5.4, 5.5, 5.6, 5.11, 5.12, 30.4_
-  - [ ] 3.6 Write the minimal state rules
+  - [x] 3.6 Write the minimal state rules
     - `state/citations.py`: `CitationValidator.validate()` that drops absent Evidence_IDs and orphan Recommended_Actions, records one violation per removal, and labels Fact or Assumption.
     - `state/confidence.py`: `apply_confidence_policy()` per design.
     - `state/verdict.py`: `investigator_verdict()` and `baseline_verdict()` including the `complete`, non-historical support condition.
     - _Requirements: 4.2, 4.3, 4.4, 4.5, 4.6, 17.4, 19.1, 19.2_
-  - [ ] 3.7 Write all six agents in minimal form
+  - [x] 3.7 Write all six agents in minimal form
     - Orchestrator: build the Default_Task_Graph (no LLM), run the two Specialist Tasks concurrently with `asyncio.gather`, then Reasoning, one Critic_Round, then Reporting. A Critic request in round 1 ends with `max_critic_rounds` when the round budget is 1 (enough for the slice).
     - Observability: issue the code-issued opening `query_logs(affected, [start − margin, start + 2h), levels=[WARN, ERROR], limit=25)`, then one findings call.
     - Dependency: no Tools yet (only `query_logs` exists); return empty findings through the same code path. Tools are wired in 7.3.
     - Reasoning, Critic, Reporting: one structured call each through the gateway, with outputs committed by the Orchestrator after citation validation.
     - Minimal prompt templates and builders with the `<context>` block.
     - _Requirements: 6.7, 7.2, 8.2, 10.1, 11.1, 12.1_
-  - [ ] 3.8 Write the report path
+  - [x] 3.8 Write the report path
     - `report/assembler.py`: `ReportAssembler` that copies Verdict, Termination_Reason, Hypotheses with adjusted confidence, Data_Gaps, claims and the Evidence appendix from the Blackboard.
     - `report/deterministic.py`: `DeterministicReportGenerator` (D7: one `mitigation` only when conclusive, then `further_investigation` per missing-evidence entry, capped).
     - `report/markdown.py`: `MarkdownRenderer` (all sections, `_No entries._` for empty ones, confidence to 2 decimals).
     - `report/writer.py`: `FileRunOutputSink` writing `report.json`, `report.md`, `trace.json` and `ledger.json` through the redactor.
     - _Requirements: 12.2, 12.6, 19.7, 20.1, 20.2, 20.3, 20.4, 21.1, 21.2, 21.7_
-  - [ ] 3.9 Write the minimal Data_Generator
+  - [x] 3.9 Write the minimal Data_Generator
     - `datagen/`: seeded RNG streams, topology builder, background telemetry and noise, record-ID and incident-ID hashing, canary generation, the `config_regression` Fault_Template, `write_incident()` (temp dir + rename, canonical JSON) to the Snapshot_Root and Answer_Key_Root.
     - `scenarios/bad-config-deploy.json`.
     - _Requirements: 22.1, 22.5, 22.7, 22.8, 22.9, 22.11, 22.12, 22.15, 22.16, 23.1, 24.1, 24.5_
-  - [ ] 3.10 Write `cli generate` and `cli investigate`
+  - [x] 3.10 Write `cli generate` and `cli investigate`
     - `cli.py` with argparse. `investigate --incident DIR --system multi --config FILE --out DIR`. Validation order from design "CLI" (argparse, config, root overlap check, path checks). Exit 0 on a written report regardless of Verdict, exit 1 with a redacted message otherwise.
     - _Requirements: 1.2, 1.3, 21.1, 28.1, 28.2, 28.3, 28.5, 28.7_
-  - [ ] 3.11 Write the thin-slice end-to-end test
+  - [x] 3.11 Write the thin-slice end-to-end test
     - `tests/e2e/test_thin_slice.py`: generate `bad-config-deploy` into `tmp_path`, run `investigate --system multi` with `config.fake.toml`, assert all four output files exist, `report.json` validates, every Req 20.1 section is present in both formats, and the canary is absent from every output.
     - _Requirements: 20.1, 21.1, 24.6_
+
+  - Notes from the thin slice (the workstreams build on these):
+    - Context rules are `SemanticCheck` callables passed to `LLMGateway.structured()` (repairable like schema errors), not Pydantic context validators. The Critic rules of Req 11.3–11.6, 11.16 and 11.17 and the claim-status rule of Req 1.6/1.7 are already in place.
+    - The injector port is `apply(tool, input, attempt, matches) -> ToolResult`; `NoFailureInjector`, `AlwaysClosedBreaker` and `NoRetry` are the placeholders that 5.2 and 5.4 replace.
+    - The slice Orchestrator (`orchestrator/run.py`) already loops up to the Critic_Round Budget, sets all ready Specialist Tasks to running before awaiting them, retries a failed attempt once and records the Data_Gap. It has no planner, de-duplication, budgets termination, per-Task timeout or watchdog yet (6.5–6.8).
+    - The Dependency_Agent has no Tools yet and returns empty findings without an LLM call; 7.3 adds its opening requests.
+    - The Observation_Summary has the logs rule; other record kinds use a generic per-kind count until 5.1.
+    - The gateway appends the output JSON Schema to every structured prompt.
 
 - [ ] 4. Checkpoint: thin-slice test green, commit on `main`, then create the five worktrees (`ws/tools-data`, `ws/orchestrator-state`, `ws/agents`, `ws/eval-baseline`, `ws/tests`). Ask the user if questions arise.
 
