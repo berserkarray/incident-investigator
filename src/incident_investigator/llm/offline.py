@@ -47,7 +47,7 @@ MAX_HYPOTHESES = 5
 PROBE_BEFORE = timedelta(hours=1)
 PROBE_AFTER = timedelta(hours=2)
 PROBE_LOOKBACK = timedelta(days=7)
-PROBE_DEPENDENCY_DEPTH = 3
+PROBE_DEPENDENCY_DEPTH = 5  # the Dependency_Agent's opening depth
 
 # Generic symptom keywords -> cause type, matched at word starts in lower-cased summary text.
 # Checked in order; the first match wins. Change-type words sit after the specific symptoms so a
@@ -492,25 +492,28 @@ class OfflineResponder(RecordingMixin):
         actions = self._actions(hypotheses, evidence, ctx.get("verdict") == "conclusive")
         return {"summary_claims": [], "recommended_actions": actions[: ctx.get("max_actions", 6)]}
 
-    # baseline
+    # baseline: a fixed probe sequence, then a final answer from the reasoning heuristic (design D4).
+    # The probes start from the windows the Baseline prompt suggests, which are the same windows the
+    # Specialists' opening requests use, so both systems begin from the same queries.
 
     @staticmethod
-    def _probes(incident: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    def _probes(ctx: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        incident = ctx["incident"]
         start = _dt(incident["start_time"])
         service = incident["affected_service"]
-        window = _window(start, PROBE_BEFORE, PROBE_AFTER)
+        windows = ctx.get("suggested_windows", {})
+        telemetry = windows.get("telemetry") or _window(start, PROBE_BEFORE, PROBE_AFTER)
+        changes = windows.get("changes") or _window(start, PROBE_LOOKBACK, timedelta(0))
+        symptom = (incident.get("symptoms") or [incident["title"]])[0][:200]
         return [
-            ("query_logs", {"service": service, "time_range": window, "levels": ["warn", "error"], "limit": OFFLINE_LIMIT}),
+            ("query_logs", {"service": service, "time_range": telemetry, "levels": ["warn", "error"], "limit": OFFLINE_LIMIT}),
             (
                 "query_metrics",
-                {"service": service, "metric_name": "error_rate", "time_range": window, "step_seconds": 600, "limit": OFFLINE_LIMIT},
+                {"service": service, "metric_name": "error_rate", "time_range": telemetry, "step_seconds": 600, "limit": OFFLINE_LIMIT},
             ),
-            (
-                "get_deployments",
-                {"service": service, "time_range": _window(start, PROBE_LOOKBACK, timedelta(0)), "limit": OFFLINE_LIMIT},
-            ),
+            ("get_deployments", {"service": service, "time_range": changes, "limit": OFFLINE_LIMIT}),
             ("get_dependencies", {"service": service, "depth": PROBE_DEPENDENCY_DEPTH, "limit": OFFLINE_LIMIT}),
-            ("search_incidents", {"query": incident["symptoms"][0][:200], "limit": OFFLINE_LIMIT}),
+            ("search_incidents", {"query": symptom, "limit": OFFLINE_LIMIT}),
         ]
 
     @staticmethod
@@ -528,7 +531,7 @@ class OfflineResponder(RecordingMixin):
 
     def _baseline_step(self, ctx: dict[str, Any]) -> dict[str, Any]:
         history = ctx.get("history", [])
-        probes = self._probes(ctx["incident"])
+        probes = self._probes(ctx)
         if len(history) < len(probes):
             tool, params = probes[len(history)]
             return {
@@ -547,6 +550,6 @@ class OfflineResponder(RecordingMixin):
                 "hypotheses": hypotheses,
                 "claim_statuses": reasoning["claim_statuses"],
                 "claims": [],
-                "recommended_actions": self._actions(hypotheses, by_id, conclusive),
+                "recommended_actions": self._actions(hypotheses, by_id, conclusive)[: ctx.get("max_actions", 6)],
             },
         }

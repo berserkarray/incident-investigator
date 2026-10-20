@@ -137,3 +137,14 @@ def make_evidence_item(
         task_id="T1",
         recorded_at=at(0),
     )
+
+
+def write_snapshot_dir(root: Path, snapshot: IncidentSnapshot | None = None, report: IncidentReport | None = None) -> Path:
+    """Write ``snapshot.json``, ``failure_profile.json`` and ``incident_report.json`` under ``root/<incident_id>``."""
+    snapshot = snapshot or make_snapshot()
+    directory = Path(root) / snapshot.incident_id
+    directory.mkdir(parents=True)
+    (directory / "snapshot.json").write_text(snapshot.model_dump_json(exclude={"failure_profile"}))
+    (directory / "failure_profile.json").write_text(snapshot.failure_profile.model_dump_json())
+    (directory / "incident_report.json").write_text((report or make_incident_report()).model_dump_json())
+    return directory
